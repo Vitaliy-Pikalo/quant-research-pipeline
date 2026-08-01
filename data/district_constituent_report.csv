@@ -1,0 +1,37 @@
+district,ticker,company,status,n_obs,first_obs,note
+Boston,BHLB,Berkshire Hills Bancorp,usable,6561,2000-06-28,"recovered via BBT: Berkshire Hills renamed Beacon Financial (Sep 2025), same listing. verified vs BB&T."
+Boston,BRKL,Brookline Bancorp,MISSING,0,,"UNRECOVERABLE. merged into Beacon Sep 2025; yfinance BRKL = recycled ticker, 18 rows from 2026-07-07."
+Boston,INDB,Independent Bank Corp,usable,4169,2010-01-04,
+New York,MTB,M&T Bank,usable,4169,2010-01-04,
+New York,VLY,Valley National Bancorp,usable,4169,2010-01-04,
+New York,NYCB,New York Community Bancorp,usable,8226,1993-11-23,"recovered via FLG: NYCB renamed Flagstar Financial (Oct 2024), same listing. 1-for-3 reverse-split adjusted."
+Philadelphia,FULT,Fulton Financial,usable,4169,2010-01-04,
+Philadelphia,CUBI,Customers Bancorp,usable,3616,2012-03-14,
+Philadelphia,WSFS,WSFS Financial,usable,4169,2010-01-04,
+Cleveland,KEY,KeyCorp,usable,4169,2010-01-04,
+Cleveland,HBAN,Huntington Bancshares,usable,4169,2010-01-04,
+Cleveland,FITB,Fifth Third Bancorp,usable,4169,2010-01-04,
+Richmond,TFC,Truist Financial,usable,4169,2010-01-04,
+Richmond,UBSI,United Bankshares,usable,4169,2010-01-04,
+Richmond,AUB,Atlantic Union Bankshares,usable,4169,2010-01-04,
+Atlanta,RF,Regions Financial,usable,4169,2010-01-04,
+Atlanta,SNV,Synovus Financial,MISSING,0,,UNRECOVERABLE. merged into Pinnacle Jan 2026. PNFP proxy rejected (different company).
+Atlanta,ABCB,Ameris Bancorp,usable,4169,2010-01-04,
+Chicago,NTRS,Northern Trust,usable,4169,2010-01-04,
+Chicago,WTFC,Wintrust Financial,usable,4169,2010-01-04,
+Chicago,ONB,Old National Bancorp,usable,4169,2010-01-04,
+St. Louis,SFNC,Simmons First National,usable,4169,2010-01-04,
+St. Louis,FMBH,First Mid Bancshares,usable,4169,2010-01-04,
+St. Louis,MSBI,Midland States Bancorp,usable,2561,2016-05-24,
+Minneapolis,USB,U.S. Bancorp,usable,4169,2010-01-04,
+Minneapolis,ALRS,Alerus Financial,usable,4169,2010-01-04,
+Minneapolis,GBCI,Glacier Bancorp,usable,4169,2010-01-04,
+Kansas City,CBSH,Commerce Bancshares,usable,4169,2010-01-04,
+Kansas City,UMBF,UMB Financial,usable,4169,2010-01-04,
+Kansas City,BOKF,BOK Financial,usable,4169,2010-01-04,
+Dallas,CMA,Comerica,MISSING,0,,"UNRECOVERABLE. acquired by Fifth Third, delisted Feb 2026. FITB proxy rejected (identical to Cleveland constituent)."
+Dallas,CFR,Cullen/Frost Bankers,usable,4169,2010-01-04,
+Dallas,PB,Prosperity Bancshares,usable,4169,2010-01-04,
+San Francisco,WAL,Western Alliance Bancorporation,usable,4169,2010-01-04,
+San Francisco,EWBC,East West Bancorp,usable,4169,2010-01-04,
+San Francisco,ZION,Zions Bancorporation,usable,4169,2010-01-04,

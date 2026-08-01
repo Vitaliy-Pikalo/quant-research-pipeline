@@ -1,0 +1,11 @@
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+scikit-learn>=1.3
+hmmlearn>=0.3
+requests>=2.31
+pytest
+
+# data pulls for the H10 Beige Book backtest (local use; not needed for pytest)
+yfinance>=0.2.40
+pysentiment2>=0.1.1

@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+run.log
+.env
+*.csv
+!backtests/cusip_ticker_map.csv
+!backtests/top20_unique_issuers.csv
+!data/*.csv
