@@ -35,9 +35,10 @@ falsifies the hypothesis I wrote down in H10.
 This matters, because a fix that silently failed to apply would produce a null
 that looks identical to this one. Audited independently:
 
-- locality scores span **0.125 to 1.000** with a 4.7x spread in the latest
-  vintage. Rockland Trust and Frost Bank score 1.000 (single-state banks);
-  U.S. Bank scores 0.118–0.229 across 28 states. The measure separates.
+- locality scores span **0.175 to 1.000** as a per-bank average, and 0.213 to
+  1.000 within the latest vintage — a 4.7x spread. Rockland Trust and Frost
+  Bank score 1.000 (single-state banks); U.S. Bank scores 0.118–0.229 across
+  28 states. The measure separates.
 - **561 bank-years, complete**, no missing vintages, arithmetic verified against
   an independent recompute.
 - weights genuinely differ from equal weighting: mean absolute daily basket
