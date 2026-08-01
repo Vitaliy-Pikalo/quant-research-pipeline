@@ -13,8 +13,45 @@ three hypotheses tested through a purged cross validation / walk forward / multi
 | H9 FX carry (UIP violation) | high rate currencies drift stronger than forward rates imply | not supported, pooled IC = -0.0125 (p=0.073) across 5 currencies |
 | H8 13F institutional copycat investing | disclosed positions of low turnover managers retain informational value after the 45 day SEC reporting lag | not supported net of market, raw return "edge" was market beta |
 | H10 Beige Book district sentiment | district level Fed tone leads that district's regional banks, excess of the regional bank sector | not supported. primary spec IC = 0.015 (p=0.56), 0 of 12 districts survive FDR. one secondary spec survived FDR and a block bootstrap, then failed split half replication and fell to DSR = 0.18 at the honest 75 trial count |
+| H10b Beige Book, locality weighted | H10's null was blamed on national banks being mapped to districts by headquarters. weight each bank by the share of its deposits in its own HQ state (FDIC Summary of Deposits) | not supported, and the *reason* is the finding. see below |
 
-the three results are directly comparable: all use the same `cv.py` / `stats.py` / `costs.py`, and the deflated Sharpe trial count is carried cumulatively across the whole project (46 from H9, 6 from H8, 23 from H10) rather than reset per hypothesis.
+the four results are directly comparable: all use the same `cv.py` / `stats.py` / `costs.py`, and the deflated Sharpe trial count is carried cumulatively across the whole project (46 from H9, 6 from H8, 23 from H10, 3 from H10b = 78) rather than reset per hypothesis.
+
+## H10b: a pre-registered test that falsified my own explanation
+
+H10 came back null, and the writeup named a specific culprit: constituents were
+assigned to Federal Reserve districts by headquarters, so U.S. Bancorp was a
+"Minneapolis" bet and Truist a "Richmond" one. If a district's basket is
+dominated by national franchises, any district level effect is diluted to zero
+by construction.
+
+That is a testable claim, so it was [pre-registered](results/H10b_PREREGISTRATION.md)
+and tested once. Constituents were weighted by the share of their deposits held
+in their own HQ state, from FDIC Summary of Deposits, point in time (a July 2018
+release uses the 2017 vintage, because the June 2018 survey was not published
+until that September).
+
+The fix applied correctly. Locality scores span 0.125 to 1.000 with a 4.7x
+spread; Rockland Trust and Frost Bank score 1.000, U.S. Bank 0.12 to 0.23 across
+28 states. And the answer did not move: IC 0.0153 -> 0.0108, bootstrap p = 0.72,
+DSR 0.0035 at 78 trials.
+
+**Why it didn't move is the actual result.** The locality weighted district
+baskets correlate with the equal weighted ones at 0.98 to 0.9999. Two to four
+regional banks inside one district co-move so strongly that reweighting them
+changes 1-2% of basket variance. The "local" bank and the "national" bank move
+together because both trade on the same national rate and credit cycle. My
+stated explanation for the H10 null is now substantially ruled out.
+
+The remaining constraint is measured rather than guessed: effective breadth
+(1/sum w^2) runs 1.56 to 3.34 constituents per district, so several districts
+are close to single stock bets and firm specific news swamps district macro.
+That is the thing to fix next, not the sentiment dictionary.
+
+Deriving districts from FDIC's charter record also settled a question H10 left
+open: First Mid (Mattoon, Illinois) sits in the 7th district, not the 8th, and
+U.S. Bank N.A. is chartered in Cincinnati rather than at its holding company's
+Minneapolis address.
 
 ## why this exists
 
@@ -91,8 +128,16 @@ then feed the resulting CSVs into a `PITFeatureStore` and point the backtest scr
 H10 needs no API key and its data is committed, so it reproduces directly:
 
 ```bash
-python backtests/run_beigebook_backtest.py   # main backtest, all 5 stages
+python backtests/run_beigebook_backtest.py   # H10, all 5 stages
 python backtests/h10_stress_test.py          # 4 check stress test of the one FDR survivor
+python backtests/run_h10b_backtest.py        # H10b, the pre registered locality weighted run
+```
+
+H10b's inputs can be rebuilt from the FDIC API (free, no key):
+
+```bash
+python backtests/fdic_locality_pull.py       # deposits by state -> locality scores
+python backtests/h10b_district_assign.py     # Fed district from the charter record
 ```
 
 to rebuild H10's inputs from source instead (~10 min of scraping, plus a yfinance pull that
@@ -121,7 +166,9 @@ script's docstring.
 - **cross sectional replication**, the FX carry test looked significant on EUR alone, then stopped being significant once extended to JPY/GBP/CHF/AUD. reported as not supported, since a result that only survives on one out of five currencies is noise, not signal.
 - **cumulative trial counting across hypotheses**, not per backtest. the deflated Sharpe for H10 is computed against 75 trials, which includes the 46 spent on H9 and the 6 on H8. resetting the count for each new hypothesis is the most common way this correction gets quietly defeated.
 - **dependence aware inference**, H10's one surviving specification used 42 day forward windows on releases spaced ~35 trading days apart, so the windows overlap and all 12 districts share each window. a block bootstrap resampling whole releases put the standard error 1.18x above the parametric one and moved p from 0.0058 to 0.0186. it then failed replication in half the sample.
-- **no post hoc subsetting**, H10's most likely cause of a false negative is that large national banks (U.S. Bancorp, Truist) are mapped to districts by HQ and are not really district level bets. the obvious fix, rerunning on a "local banks only" subset, was deliberately not done, because a subset rule invented after seeing a null is a researcher degree of freedom and picking the one that rescues the hypothesis is precisely what this pipeline exists to prevent. it is written up as a pre registered follow up with an objective locality measure instead.
+- **no post hoc subsetting**, H10's most likely cause of a false negative is that large national banks (U.S. Bancorp, Truist) are mapped to districts by HQ and are not really district level bets. the obvious fix, rerunning on a "local banks only" subset, was deliberately not done, because a subset rule invented after seeing a null is a researcher degree of freedom and picking the one that rescues the hypothesis is precisely what this pipeline exists to prevent. it became H10b instead: pre registered first, with a continuous locality weight so there is no threshold to tune, then run once.
+- **pre registration with a decision rule fixed in advance**, H10b's four criteria (positive IC, survives a block bootstrap, positive net of costs, DSR > 0.95 at the cumulative trial count) were written down and signed off before any FDIC data was pulled. one of the four was met. the commit history has the pre registration landing before the backtest, which is the point.
+- **checking that a fix actually applied before believing a null**, a repair that silently fails to take produces a null indistinguishable from a real one. H10b's locality weights were audited independently (spread, completeness, arithmetic, point in time correctness, and the resulting basket differences in bps) before the result was interpreted.
 
 ## known limitations
 
@@ -132,7 +179,9 @@ script's docstring.
 - H10: 3 of 36 bank constituents are unrecoverable delistings, so Boston, Atlanta and Dallas run on 2 names instead of 3. the missing names are all acquisition targets, so their absence is not missing at random
 - H10: 2 of 133 Beige Book releases (2011-03-02, 2015-03-04) could not be scraped
 - H10: one constituent, FMBH (Mattoon, Illinois), sits near the 7th/8th Federal Reserve district boundary and its district assignment is unresolved
-- H10: Loughran-McDonald is a bag of words dictionary with no negation handling, which is close to a worst case for the Beige Book's deliberately hedged prose ("modest", "slight", "little changed"). a weak measured signal may reflect a weak instrument rather than a weak effect
+- H10: Loughran-McDonald is a bag of words dictionary with no negation handling, which is close to a worst case for the Beige Book's deliberately hedged prose ("modest", "slight", "little changed"). a weak measured signal may reflect a weak instrument rather than a weak effect. this is now the largest UNTESTED weakness, since H10b ruled out the locality explanation
+- H10b: locality is HQ *state* share of deposits, not share inside the Fed district itself. district boundaries are county level and published only as ArcGIS shapefiles, so the state proxy was pre registered with this weakness stated
+- H10b: the ticker to FDIC institution mapping is the fourth hand built mapping in this project. three errors were caught while building it (Truist resolving to Bank of America under a max assets rule, United Bankshares to an unrelated Indiana thrift, and NYCB to the pre 2022 Michigan Flagstar charter). all three were caught by automated gates rather than by reading the table, which is the only reason to trust the fourth mapping more than the first three
 
 ## license
 
