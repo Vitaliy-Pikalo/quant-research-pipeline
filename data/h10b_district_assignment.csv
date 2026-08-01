@@ -1,0 +1,34 @@
+ticker,fdic_name,hq_state,hand_district,fdic_district,fed_number,as_of_vintage,changed
+BHLB,Berkshire Bank,MA,Boston,Boston,1,2025,False
+INDB,Rockland Trust Company,MA,Boston,Boston,1,2025,False
+MTB,Manufacturers and Traders Trust Company,NY,New York,New York,2,2025,False
+VLY,Valley National Bank,NJ,New York,New York,2,2025,False
+NYCB,New York Community Bank,NY,New York,New York,2,2022,False
+FULT,"Fulton Bank, National Association",PA,Philadelphia,Philadelphia,3,2025,False
+CUBI,Customers Bank,PA,Philadelphia,Philadelphia,3,2025,False
+WSFS,"Wilmington Savings Fund Society, FSB",DE,Philadelphia,Philadelphia,3,2025,False
+KEY,KeyBank National Association,OH,Cleveland,Cleveland,4,2025,False
+HBAN,The Huntington National Bank,OH,Cleveland,Cleveland,4,2025,False
+FITB,"Fifth Third Bank, National Association",OH,Cleveland,Cleveland,4,2025,False
+TFC,Truist Bank,NC,Richmond,Richmond,5,2025,False
+UBSI,United Bank,WV,Richmond,Richmond,5,2017,False
+AUB,Atlantic Union Bank,VA,Richmond,Richmond,5,2025,False
+RF,Regions Bank,AL,Atlanta,Atlanta,6,2025,False
+ABCB,Ameris Bank,GA,Atlanta,Atlanta,6,2025,False
+NTRS,The Northern Trust Company,IL,Chicago,Chicago,7,2025,False
+WTFC,"Wintrust Bank, National Association",IL,Chicago,Chicago,7,2025,False
+ONB,Old National Bank,IN,Chicago,St. Louis,8,2025,True
+SFNC,Simmons Bank,AR,St. Louis,St. Louis,8,2025,False
+FMBH,"First Mid Bank & Trust, National Association",IL,St. Louis,Chicago,7,2025,True
+MSBI,Midland States Bank,IL,St. Louis,St. Louis,8,2025,False
+USB,U.S. Bank National Association,OH,Minneapolis,Cleveland,4,2025,True
+ALRS,"Alerus Financial, National Association",ND,Minneapolis,Minneapolis,9,2025,False
+GBCI,Glacier Bank,MT,Minneapolis,Minneapolis,9,2025,False
+CBSH,Commerce Bank,MO,Kansas City,Kansas City,10,2025,False
+UMBF,"UMB Bank, National Association",MO,Kansas City,Kansas City,10,2025,False
+BOKF,"BOKF, National Association",OK,Kansas City,Kansas City,10,2025,False
+CFR,Frost  Bank,TX,Dallas,Dallas,11,2025,False
+PB,Prosperity Bank,TX,Dallas,Dallas,11,2025,False
+WAL,Western Alliance Bank,AZ,San Francisco,San Francisco,12,2025,False
+EWBC,East West Bank,CA,San Francisco,San Francisco,12,2025,False
+ZION,"Zions Bancorporation, N.A.",UT,San Francisco,San Francisco,12,2025,False
