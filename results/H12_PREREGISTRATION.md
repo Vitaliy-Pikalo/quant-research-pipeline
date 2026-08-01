@@ -212,8 +212,9 @@ first satisfied — see §5 for what "date" means here) if, within a rolling
    ±5 trading days of the issuer's next-or-most-recent scheduled earnings
    announcement** (from EDGAR 8-K Item 2.02, or the exchange's earnings
    calendar). This is a hard exclusion, not a control variable, for the
-   primary spec — see §11 for why, and §9 for a declared secondary spec that
-   relaxes this instead of excluding.
+   primary spec — §9 has a declared secondary spec that relaxes this to a
+   regression covariate instead of excluding, specifically to check the
+   exclusion isn't hiding or inflating a real earnings-linked effect.
 
 Only condition (4) is a threshold chosen without a specific literature value
 to anchor it; §11 explains why 5 days and treats it explicitly as a declared,
@@ -263,9 +264,9 @@ failure mode H10b's §6 already ruled out for basket weighting.
 
 ## 6. Benchmark and return construction
 
-Raw event-firm return is not the test statistic — per §1.4 point 3 and the
-2025 microcap paper's warning about prior-decline-driven returns, the primary
-metric must strip out size, sector, and momentum before it means anything.
+Raw event-firm return is not the test statistic — per §1.3's warning about
+prior-decline-driven returns, the primary metric must strip out size,
+sector, and momentum before it means anything.
 
 For each event, build a **matched control portfolio**: all non-event firms in
 the same market-cap quintile (relative to the full universe on that date),
@@ -292,7 +293,7 @@ SPY/KRE-relative convention.
 | momentum | matched-control portfolio is stratified by prior-6-month return tercile (§6) |
 | market beta | matched-control portfolio is same market-cap quintile, which proxies beta closely at this size range; strategy-level beta to IWM reported explicitly as a check |
 | sector effects | matched-control portfolio stratified by 2-digit SIC (§6) |
-| liquidity | universe-level ADV floor (§3) plus liquidity tercile as a *reported* breakdown of results, not a further stratification (stratifying on 4 dimensions at once starts starving each cell of observations — see §14 power check) |
+| liquidity | universe-level ADV floor (§3) plus liquidity tercile as a *reported* breakdown of results, not a further stratification (stratifying on 4 dimensions at once starts starving each cell of observations — see §13 power check) |
 | market cap | universe-level band (§3) plus matched-control quintile (§6) |
 | reversal / "buying the dip" | reported explicitly as a robustness cut: results split by whether the event followed a >10% 20-day price decline, per the 2025 microcap paper's finding. If the effect is concentrated entirely in post-decline events, that is reported honestly as evidence for a reversal explanation, not suppressed |
 
@@ -311,7 +312,7 @@ SPY/KRE-relative convention.
   acquisition targets).
 - **Multiple testing.** Every specification run against real data — primary,
   each declared secondary (§9), the strategy backtest — consumes trial count
-  under BH-FDR and the cumulative deflated Sharpe count (§15). No
+  under BH-FDR and the cumulative deflated Sharpe count evaluated in §10. No
   undeclared exploration.
 - **Overlapping events / clustered errors.** A single firm can generate
   multiple cluster events with overlapping 21-day windows; the same calendar
@@ -433,7 +434,7 @@ auditing the locality weights before trusting the null:
    that `known_at` (cluster-completion timestamp) is strictly later than the
    transaction date of all three qualifying purchases, and that no price data
    dated before `known_at` was used in feature construction. This is the
-   check most likely to catch the H5-style bug (release-date-as-placeholder)
+   check most likely to catch the H10-style bug (release-date-as-placeholder)
    recurring in a new dataset.
 2. **Power check.** Count qualifying events in the $50M–$2B universe,
    2015–2025, under the primary (≥3 insider) definition, with **no returns
