@@ -53,6 +53,10 @@ open: First Mid (Mattoon, Illinois) sits in the 7th district, not the 8th, and
 U.S. Bank N.A. is chartered in Cincinnati rather than at its holding company's
 Minneapolis address.
 
+## start here
+
+**[The bugs that don't crash](results/POST_bugs_that_produce_results.md)** — the writeup of what this project actually taught me. Of roughly a dozen bugs hit along the way, the dangerous ones never threw an exception: a release date five weeks early, 850 words of navigation menu scored as sentiment, four missing tickers that were all acquisition targets, a recycled ticker that returned an unrelated company, and a resolver that matched Truist to Bank of America because it was the biggest bank in North Carolina. Plus the one experiment where I pre-registered my own explanation for a null result and watched it get falsified.
+
 ## why this exists
 
 most retail backtests silently leak information: look ahead bias from mis timestamped features, no purge/embargo around cross validation folds, no correction for testing dozens of ideas before reporting the one that "worked." this project implements the standard institutional fixes for each of those problems, then uses them honestly, including reporting negative results instead of only publishing the wins.

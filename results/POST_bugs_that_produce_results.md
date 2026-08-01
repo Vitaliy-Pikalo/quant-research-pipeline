@@ -142,3 +142,15 @@ The test also produced something I hadn't set out to find: measured effective br
 **Count your trials across the whole project.** Not per backtest, and not per hypothesis. H10's most promising specification looked like a 0.94-probability result treated in isolation. Against 75 trials it was 0.18. The gap between those two numbers *is* the selection bias, and it's arithmetic, not judgement.
 
 Four hypotheses, four negatives, and a dozen bugs that would have quietly improved my results. I'd rather publish that than a backtest with a nice equity curve and no error bars.
+
+---
+
+## Postscript
+
+While fact-checking this post against the data files, I found one more.
+
+The paragraph about locality scores originally read "0.125 to 1.000". That 0.125 was NYCB — from *before* I corrected the Flagstar charter mix-up described in section 5. I'd fixed the data, re-run everything, and left the number sitting in my prose where it no longer belonged. It's off by 40% and it reads as completely plausible.
+
+A stale figure in a writeup is the same species as everything above: no error, no warning, a number that looks fine. The only reason I caught it is that I'd made a habit of re-deriving every stated number from the source files instead of trusting the draft.
+
+Which is the whole point. You don't outgrow this failure mode by being careful. You outgrow it by building something that checks.
