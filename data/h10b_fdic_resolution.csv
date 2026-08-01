@@ -1,0 +1,34 @@
+ticker,search_name,expected_state,fdic_name,fdic_state,fdic_city,cert,rssdhcr,namehcr,asset_k,active,state_matched,name_similarity,n_candidates,runners_up,status
+BHLB,Berkshire Bank,MA,Berkshire Bank,MA,Pittsfield,23621,2333663,BERKSHIRE HILLS BCORP INC,12027717,0,True,1.0,5,"Berkshire Bank & Trust Company(MA); Bank of Boston-Berkshire, National Association(MA); Bank of New England - Berkshire County, National Association(MA)",ok
+INDB,Rockland Trust Company,MA,Rockland Trust Company,MA,Rockland,9712,1136803,INDEPENDENT BANK CORP,24787974,1,True,1.0,1,,ok
+MTB,Manufacturers and Traders Trust Company,NY,Manufacturers and Traders Trust Company,NY,Buffalo,588,1037003,M&T BANK CORP,214201000,1,True,1.0,1,,ok
+VLY,Valley National Bank,NJ,Valley National Bank,NJ,Passaic,9396,1048773,VALLEY NATIONAL BCORP,64388074,1,True,1.0,4,"New Jersey National Bank - Delaware Valley(NJ); Midlantic National Bank/Merchants(NJ); First Fidelity Bank, National Association, South Jersey(NJ)",ok
+NYCB,New York Community Bank,NY,New York Community Bank,NY,Hicksville,16022,2132932,NEW YORK COMMUNITY BCORP INC,62909410,0,True,1.0,3,CMS Bank(NY); Community National Bank and Trust Company of New York(NY),ok
+FULT,Fulton Bank,PA,"Fulton Bank, National Association",PA,Lancaster,7551,1117129,FULTON FINANCIAL CORP,32107617,1,True,1.0,2,The Fulton County National Bank and Trust Company(PA),ok
+CUBI,Customers Bank,PA,Customers Bank,PA,Malvern,34444,4284536,CUSTOMERS BCORP INC,25862378,1,True,1.0,1,,ok
+WSFS,Wilmington Savings Fund Society,DE,"Wilmington Savings Fund Society, FSB",DE,Wilmington,17838,3844269,WSFS FINANCIAL CORP,22016606,1,True,1.0,1,,ok
+KEY,KeyBank National Association,OH,KeyBank National Association,OH,Cleveland,17534,1068025,KEYCORP,185983433,1,True,1.0,2,Keybank National Association(OH),ok
+HBAN,The Huntington National Bank,OH,The Huntington National Bank,OH,Columbus,6560,1068191,HUNTINGTON BANCSHARES INC,284135374,1,True,1.0,13,The Huntington National Bank of London(OH); The Huntington National Bank of Franklin(OH); The Huntington National Bank of Kentucky(OH),ok
+FITB,Fifth Third Bank,OH,"Fifth Third Bank, National Association",OH,Cincinnati,6672,1070345,FIFTH THIRD BCORP,296118000,1,True,1.0,11,"Fifth Third Bank, Ohio Valley(OH); Fifth Third Bank, Northwestern Ohio, National Association(OH); The Fifth Third Bank(OH)",ok
+TFC,Truist Bank,NC,Truist Bank,NC,Charlotte,9846,1074156,TRUIST FINANCIAL CORP,541180000,1,True,1.0,13,"American Bank of the Carolinas(NC); Bank of America, National Association(NC); Wachovia Bank, National Association(NC)",ok
+UBSI,United Bank,WV,United Bank,WV,Parkersburg,6784,1076217,UNITED BANKSHARES INC,6313647,0,True,1.0,5,"United Bank, Inc.(WV); United National Bank - North(WV); United National Bank - Central(WV)",ok
+AUB,Atlantic Union Bank,VA,Atlantic Union Bank,VA,Richmond City,34589,1971693,ATLANTIC UNION BANKSHARES CORP,37228893,1,True,1.0,1,,ok
+RF,Regions Bank,AL,Regions Bank,AL,Birmingham,12368,3242838,REGIONS FINANCIAL CORP,159430000,1,True,1.0,2,Colonial Bank(AL),ok
+ABCB,Ameris Bank,GA,Ameris Bank,GA,Atlanta,20504,1082067,AMERIS BCORP,28021961,1,True,1.0,1,,ok
+NTRS,The Northern Trust Company,IL,The Northern Trust Company,IL,Chicago,913,1199611,NORTHERN TRUST CORP,173842608,1,True,1.0,1,,ok
+WTFC,Wintrust Bank,IL,"Wintrust Bank, National Association",IL,Chicago,33935,2260406,WINTRUST FINANCIAL CORP,9278678,1,True,1.0,1,,ok
+ONB,Old National Bank,IN,Old National Bank,IN,Evansville,3832,1098303,OLD NATIONAL BCORP,72614322,1,True,1.0,4,"Old National Bank(IN); Old-First National Bank in Bluffton, Bluffton, Indiana(IN); Fifth Third Bank, Indiana(IN)",ok
+SFNC,Simmons Bank,AR,Simmons Bank,AR,Pine Bluff,3890,1094828,SIMMONS FIRST NATIONAL CORP,24649062,1,True,1.0,9,Simmons First Bank of Searcy(AR); Simmons First Bank of Northwest Arkansas(AR); Simmons First Bank of Eldorado(AR),ok
+FMBH,First Mid Bank & Trust,IL,"First Mid Bank & Trust, National Association",IL,Mattoon,3705,1206760,FIRST MID BANCSHARES INC,8200993,1,True,1.0,1,,ok
+MSBI,Midland States Bank,IL,Midland States Bank,IL,Effingham,1040,1491351,MIDLAND STATES BCORP INC,6539611,1,True,1.0,1,,ok
+USB,U.S. Bank National Association,OH,U.S. Bank National Association,OH,Cincinnati,6548,1119794,U S BCORP,683379960,1,True,1.0,1,,ok
+ALRS,Alerus Financial,ND,"Alerus Financial, National Association",ND,Grand Forks,3931,2067007,ALERUS FINANCIAL CORP,5277526,1,True,1.0,1,,ok
+GBCI,Glacier Bank,MT,Glacier Bank,MT,Kalispell,30788,2003975,GLACIER BCORP INC,31717351,1,True,1.0,5,Glacier Bank of Whitefish(MT); First Interstate Bank of Glacier County(MT); Glacier National Bank(MT),ok
+CBSH,Commerce Bank,MO,Commerce Bank,MO,Kansas City,24998,1049341,COMMERCE BANCSHARES INC,35540239,1,True,1.0,20,"Commerce Bank, National Association(MO); Commerce Bank, National Association(MO); Commerce Bank, National Association(MO)",ok
+UMBF,UMB Bank,MO,"UMB Bank, National Association",MO,Kansas City,8273,1049828,UMB FINANCIAL CORP,72349509,1,True,1.0,12,"UMB Bank Kansas, National Association(MO); UMB Bank, Warsaw, National Association(MO); UMB Bank of St. Louis, National Association(MO)",ok
+BOKF,"BOKF, National Association",OK,"BOKF, National Association",OK,Tulsa,4214,1883693,BOK FINANCIAL CORP,53492601,1,True,1.0,1,,ok
+CFR,Frost Bank,TX,Frost  Bank,TX,San Antonio,5510,1102367,CULLEN FROST BANKERS INC,52769892,1,True,1.0,7,"Colonial Frost Bank, National Association(TX); Citizens Frost Bank, National Association(TX); Liberty Frost Bank, National Association(TX)",ok
+PB,Prosperity Bank,TX,Prosperity Bank,TX,El Campo,16835,1109599,PROSPERITY BANCSHARES INC,43608962,1,True,1.0,1,,ok
+WAL,Western Alliance Bank,AZ,Western Alliance Bank,AZ,Phoenix,57512,2349815,WESTERN ALLIANCE BCORP,98766387,1,True,1.0,1,,ok
+EWBC,East West Bank,CA,East West Bank,CA,Pasadena,31628,2734233,EAST WEST BCORP INC,82474471,1,True,1.0,1,,ok
+ZION,Zions Bancorporation,UT,"Zions Bancorporation, N.A.",UT,Salt Lake City,2270,,,87956932,1,True,1.0,1,,ok
