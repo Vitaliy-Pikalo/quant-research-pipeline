@@ -61,7 +61,15 @@ def parse_submission_filings_for_item_202(raw_submission: dict) -> pd.DataFrame:
     df["cik"] = cik
 
     is_8k = df["form"] == "8-K"
-    has_202 = df["items"].fillna("").str.contains(ITEM_202_PATTERN, regex=True)
+    # .astype(str) before .str.contains() is deliberate, not redundant: a
+    # submission with zero recent filings (n == 0, a genuinely empty but
+    # valid response -- e.g. a very new filer, or the fallback stub used
+    # when a live fetch fails) produces an empty "items" column that pandas
+    # infers as float64 rather than object/string, and `.str.contains()`
+    # raises AttributeError on a non-string-dtype Series. Caught by
+    # tests/test_h11_data_probe_e2e.py's empty-submission-fallback case,
+    # not found by any fixture with at least one real filing.
+    has_202 = df["items"].astype(str).fillna("").str.contains(ITEM_202_PATTERN, regex=True)
     result = df[is_8k & has_202].copy()
 
     result["filing_date"] = pd.to_datetime(result["filing_date"])

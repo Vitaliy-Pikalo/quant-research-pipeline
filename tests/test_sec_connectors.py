@@ -178,3 +178,19 @@ class TestParseItem202Filings:
         raw["filings"]["recent"]["items"] = ["", "5.02", "5.02", "5.02"]
         out = parse_submission_filings_for_item_202(raw)
         assert len(out) == 0
+
+    def test_zero_recent_filings_does_not_raise(self):
+        # a genuinely empty submission (all parallel arrays length 0) --
+        # e.g. the fallback stub h11_data_probe.py substitutes when a live
+        # fetch fails. Previously raised AttributeError: pandas infers an
+        # empty "items" column as float64, not string, and .str.contains()
+        # rejects non-string dtypes. Caught by
+        # tests/test_h11_data_probe_e2e.py; regression-tested directly here.
+        raw = {
+            "cik": 99,
+            "filings": {
+                "recent": {"form": [], "accessionNumber": [], "filingDate": [], "acceptanceDateTime": [], "items": []}
+            },
+        }
+        out = parse_submission_filings_for_item_202(raw)
+        assert len(out) == 0

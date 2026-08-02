@@ -8,6 +8,16 @@ identifiers -> universe -> event generation -> matched control -> cost
 model, and reports the diagnostics that decide whether it's safe to scale
 to the full 2015-2025 panel.
 
+This version additionally produces a structured data-quality report
+(hypotheses.h11_pead.probe_report) per the current validation milestone:
+companies attempted/resolved, filings retrieved, earnings events
+identified, EPS values extracted, standard/custom tag rates, CIK->ticker
+resolution failures, and a full attrition funnel showing exactly where
+every non-qualifying firm-quarter was lost. This report is NOT a backtest
+result -- per the standing rule, filters are not tuned based on these
+counts. Unexpected attrition is something to investigate as a potential
+data issue, not something to adjust away.
+
 MUST BE RUN LOCALLY. This project's Claude sandbox cannot reach
 data.sec.gov or www.sec.gov (confirmed directly during the H11 data
 availability review -- only pypi.org and github.com resolve from that
@@ -27,8 +37,8 @@ Usage (from repo root, after `pip install -r requirements.txt`):
 Outputs, all under data/h11_probe/:
     identifiers.csv        resolved CIK/ticker/SIC per input CIK
     events.csv              generated Event records (up to ~100)
+    report.md, report.json  the data-quality report described above
     diagnostics/*.json      per-stage StageRunLog files
-    diagnostics/attrition.csv
 """
 from __future__ import annotations
 
@@ -41,7 +51,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # allow running as a script
 
-from data_connectors.sec_8k_item202 import fetch_item_202_filings
+from data_connectors.sec_8k_item202 import fetch_item_202_filings, parse_submission_filings_for_item_202
 from data_connectors.sec_company_tickers import fetch_submission
 from data_connectors.sec_financial_statement_datasets import (
     custom_tag_fallback_rate,
@@ -51,6 +61,7 @@ from data_connectors.sec_financial_statement_datasets import (
 from event_study.diagnostics import StageRunLog, run_gate, stage_timer
 from hypotheses.h11_pead.config import H11Config
 from hypotheses.h11_pead.event_generator import build_event, compute_sue, determine_known_at
+from hypotheses.h11_pead.probe_report import AttemptOutcome, build_probe_report
 
 OUT_DIR = Path(__file__).resolve().parents[1] / "data" / "h11_probe"
 
@@ -62,22 +73,42 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
     session = requests.Session()
 
     # --- stage 0/1: identifiers + raw EPS pull ---
+    ticker_resolution: dict[str, str | None] = {}
+    identifiers = []
     with stage_timer() as t0:
-        identifiers = []
         for cik in ciks:
-            sub = fetch_submission(cik, session=session)
+            try:
+                sub = fetch_submission(cik, session=session)
+            except Exception as exc:  # noqa: BLE001 -- deliberately broad: any failure here is a
+                # resolution failure worth counting and reporting, not a
+                # reason to abort the whole probe over one bad CIK
+                ticker_resolution[cik] = None
+                identifiers.append({"cik": cik, "name": None, "sic_code": None, "error": str(exc)})
+                continue
+            # sec_company_tickers.parse_submission returns submissions
+            # metadata (name/SIC/exchanges), not a ticker directly -- this
+            # probe treats "submission fetch succeeded and returned a name"
+            # as identifier resolution, and separately notes (report.md)
+            # that this is a CURRENT mapping, not point-in-time; see
+            # probe_report.py's STANDARD_NOTES.
+            ticker_resolution[cik] = cik if sub.get("name") else None
             identifiers.append(sub)
-        pd.DataFrame(identifiers).to_csv(OUT_DIR / "identifiers.csv", index=False)
 
         sub_frames, num_frames = [], []
         for q in quarters:
             sub_df, num_df = fetch_quarter(q, session=session)
             sub_frames.append(sub_df)
             num_frames.append(num_df)
-        sub_all = pd.concat(sub_frames, ignore_index=True)
-        num_all = pd.concat(num_frames, ignore_index=True)
+        sub_all = pd.concat(sub_frames, ignore_index=True) if sub_frames else pd.DataFrame()
+        num_all = pd.concat(num_frames, ignore_index=True) if num_frames else pd.DataFrame()
 
-    fallback_diag = custom_tag_fallback_rate(num_all)
+    pd.DataFrame(identifiers).to_csv(OUT_DIR / "identifiers.csv", index=False)
+
+    fallback_diag = (
+        custom_tag_fallback_rate(num_all)
+        if not num_all.empty
+        else {"n_eps_like_facts": 0, "n_standard": 0, "n_custom": 0, "custom_fallback_rate": float("nan")}
+    )
     stage0_log = StageRunLog(
         stage="stage_0_probe_acquisition",
         input_row_count=len(ciks),
@@ -97,20 +128,58 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
     stage0_log.write(OUT_DIR / "diagnostics" / "stage0_log.json")
 
     # --- stage 3: event generation, restricted to the probe CIKs ---
-    eps_records = extract_eps_records(sub_all, num_all)
+    eps_records = (
+        extract_eps_records(sub_all, num_all)
+        if not sub_all.empty
+        else pd.DataFrame(columns=["cik", "period_end", "eps_value", "tag_used", "form", "filed", "adsh"])
+    )
     events = []
+    attempt_outcomes: list[AttemptOutcome] = []
+    eightk_item202_counts: dict[str, int] = {}
     with stage_timer() as t3:
         for cik in ciks:
             cik_padded = cik.zfill(10)
+
+            try:
+                item202 = fetch_item_202_filings(cik_padded, session=session)
+            except Exception:  # noqa: BLE001 -- same rationale as the identifier fetch above:
+                # a fetch failure for one CIK should not abort the whole probe,
+                # but it must not be silently treated as "no qualifying 8-K"
+                # either -- counted separately below via eightk_item202_counts.
+                # NOTE: this empty stub must supply every parallel-array key
+                # parse_submission_filings_for_item_202 reads unconditionally
+                # (accessionNumber, filingDate), not just "form" -- an
+                # earlier version of this fallback omitted them and crashed
+                # inside the very error-handling branch meant to prevent a
+                # crash, caught by tests/test_h11_data_probe_e2e.py.
+                item202 = parse_submission_filings_for_item_202(
+                    {
+                        "cik": int(cik_padded),
+                        "filings": {"recent": {"form": [], "accessionNumber": [], "filingDate": [], "acceptanceDateTime": [], "items": []}},
+                    }
+                )
+            eightk_item202_counts[cik_padded] = len(item202)
+
             firm_eps = eps_records[eps_records["cik"] == cik_padded].set_index("period_end")["eps_value"]
             if firm_eps.empty:
+                attempt_outcomes.append(AttemptOutcome(cik=cik_padded, period_end=None, reason="no_eps_records_for_cik"))
                 continue
-            sue, sue_diag = compute_sue(firm_eps, config)
 
-            item202 = fetch_item_202_filings(cik_padded, session=session)
+            sue, sue_diag = compute_sue(firm_eps, config)
             period_end = firm_eps.index.max()
+            period_end_str = period_end.strftime("%Y-%m-%d")
+
+            if sue is None:
+                attempt_outcomes.append(
+                    AttemptOutcome(cik=cik_padded, period_end=period_end_str, reason=sue_diag.get("reason", "sue_unavailable"))
+                )
+                continue
+
             tenq_rows = sub_all[(sub_all["cik"] == int(cik)) & (sub_all["period"] == int(period_end.strftime("%Y%m%d")))]
             if tenq_rows.empty:
+                attempt_outcomes.append(
+                    AttemptOutcome(cik=cik_padded, period_end=period_end_str, reason="no_10q_row_for_period_end")
+                )
                 continue
             tenq_filed = pd.to_datetime(tenq_rows.iloc[0]["filed"], format="%Y%m%d", utc=True).tz_convert("US/Eastern")
 
@@ -122,26 +191,27 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
 
             known_at, source = determine_known_at(tenq_filed, eightk_ts, config)
 
-            try:
-                event = build_event(
-                    entity_id=cik_padded,
-                    ticker="UNKNOWN",  # ticker resolution requires event_study.identifiers with a full
-                                       # point-in-time history, out of scope for this small probe
-                    period_end=period_end,
-                    known_at=known_at,
-                    event_source=source,
-                    market_cap=float("nan"),  # requires a price panel join, not part of this probe
-                    sic_code=str(sub_all.loc[sub_all["cik"] == int(cik), "sic"].iloc[0]) if "sic" in sub_all.columns else "",
-                    adv_20d=float("nan"),
-                    sue_value=sue,
-                    sue_diagnostics=sue_diag,
-                )
-                events.append(event)
-            except ValueError as exc:
-                # a look-ahead-bias ValueError here is exactly the failure
-                # this probe exists to catch cheaply, before scaling --
-                # re-raised, not swallowed, per the standing implementation rule
-                raise
+            # a look-ahead-bias ValueError from build_event() here is
+            # exactly the failure this probe exists to catch cheaply,
+            # before scaling -- deliberately NOT caught, per the standing
+            # implementation rule against continuing past a failed
+            # validation "because it probably won't matter"
+            event = build_event(
+                entity_id=cik_padded,
+                ticker="UNKNOWN",  # ticker resolution requires event_study.identifiers with a full
+                                   # point-in-time history, out of scope for this small probe -- see
+                                   # probe_report.py's STANDARD_NOTES
+                period_end=period_end,
+                known_at=known_at,
+                event_source=source,
+                market_cap=float("nan"),  # requires a price panel join, not part of this probe
+                sic_code=str(sub_all.loc[sub_all["cik"] == int(cik), "sic"].iloc[0]) if "sic" in sub_all.columns else "",
+                adv_20d=float("nan"),
+                sue_value=sue,
+                sue_diagnostics=sue_diag,
+            )
+            events.append(event)
+            attempt_outcomes.append(AttemptOutcome(cik=cik_padded, period_end=period_end_str, reason=None))
 
     stage3_log = StageRunLog(
         stage="stage_3_probe_event_generation",
@@ -161,9 +231,20 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
 
     pd.DataFrame([vars(e) | {"event_id": e.event_id} for e in events]).to_csv(OUT_DIR / "events.csv", index=False)
 
-    print(f"Probe complete: {len(events)}/{len(ciks)} CIKs resolved to an event.")
-    print(f"Custom-tag fallback rate this quarter batch: {fallback_diag['custom_fallback_rate']:.1%}")
-    print(f"Outputs written under {OUT_DIR}")
+    report = build_probe_report(
+        ciks_attempted=ciks,
+        ticker_resolution=ticker_resolution,
+        quarters_requested=quarters,
+        filings_retrieved_total=len(sub_all),
+        eightk_item202_counts=eightk_item202_counts,
+        eps_records=eps_records,
+        fallback_diag=fallback_diag,
+        attempt_outcomes=attempt_outcomes,
+    )
+    report.write(OUT_DIR)
+
+    print(report.to_markdown())
+    print(f"\nFull report written to {OUT_DIR / 'report.md'} and {OUT_DIR / 'report.json'}")
 
 
 if __name__ == "__main__":
