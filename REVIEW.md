@@ -1,196 +1,212 @@
-# REVIEW.md -- Milestone: H11 data-integrity validation (amendment, parser fixtures, probe report)
+# REVIEW.md -- Milestone: SEC request telemetry + XBRL tag diagnostics (instrumentation)
 
 Per the standing workflow: this is the handoff document for external
-(GitHub-based) review of this milestone. Supersedes the previous
-`REVIEW.md` (committed at `9aedf9f`, still readable in git history).
+(GitHub-based) review of this milestone. Supersedes the prior milestone's
+`REVIEW.md` (preserved in git history at `7b2e94b`'s predecessor commits).
 
-**Scope note, stated up front:** per explicit instruction, this milestone
-is validation, not feature expansion. Nothing here tunes a parameter or
-changes what H11 measures. Two things were fixed -- both were bugs in
-error-handling/edge-case code paths discovered by testing, not
-methodology or filter changes.
+**Scope note, stated up front, same as last milestone:** this is
+instrumentation, not a heuristic or filter change. `custom_tag_fallback_rate()`
+and `extract_eps_records()` are byte-for-byte unchanged. Every `fetch_*`
+function's request/response/exception behavior is unchanged -- `telemetry`
+is an additive, defaulted-to-None parameter throughout.
 
 ## What changed
 
-- **`amendments/H11_AMENDMENT_001.md`** (new) -- resolves the "5 quarters
-  vs. 8-quarter volatility window" arithmetic conflict in
-  `H11_PREREGISTRATION.md` sections 3/5, flagged but left open in the
-  prior milestone. `results/H11_PREREGISTRATION.md` itself is **untouched**
-  -- the amendment is a separate document per the standing rule against
-  silently editing a frozen pre-registration. Still pending explicit
-  sign-off (checkbox unchecked); real SEC data collection under H11 does
-  not proceed on the `min_seasonal_diffs` threshold specifically until
-  that box is checked, per the amendment's own §6.
+Directly in response to the first real probe run's findings (3 CIKs,
+2022q2/q3): a clean run with 0 crashes but no way to tell whether SEC
+access was actually healthy, a 52.3% custom-tag fallback rate with no way
+to inspect which tags drove it, and a misleadingly-labeled "8-K Item 2.02
+filings found" metric that was actually each CIK's entire historical count.
 
-- **`tests/test_sec_parser_fixtures.py`** (new, 10 tests) -- five named,
-  deterministic validation scenarios requested for this milestone: a
-  normal 8-K Item 2.02 filing, a filer with no qualifying Item 2.02 (10-Q
-  fallback), 8-K/A amendments in both directions (correctly-ignored and
-  known-incomplete), standard XBRL EPS tags, and custom XBRL extension
-  tags. One of these tests (`test_custom_tag_using_an_abbreviation_is_
-  invisible_to_the_fallback_diagnostic`) surfaced a real, previously
-  undocumented limitation -- see Validation performed.
+- **`data_connectors/telemetry.py`** (new) -- `RequestRecord`,
+  `RequestTelemetryCollector`, `instrumented_get()`. Every `fetch_*`
+  function across all three connectors now accepts an optional `telemetry`
+  parameter; when supplied, exactly one record is captured per request
+  (endpoint, HTTP status, response size, timestamp, elapsed time, any
+  rate-limit headers SEC sends) -- including the real status code on a
+  4xx/5xx response, captured before `raise_for_status()` raises on it, not
+  skipped because the request ultimately failed. `retry_count` exists but
+  is always 0 -- no retry logic exists anywhere in this project yet; the
+  field is there so a future retry implementation has somewhere to report
+  to without a second instrumentation pass. 16 unit tests against a fake
+  session/response, no network.
 
-- **`hypotheses/h11_pead/probe_report.py`** (new) + 
-  **`tests/test_h11_probe_report.py`** (new, 8 tests) -- a pure,
-  fixture-tested report-assembly module: `AttemptOutcome`,
-  `ProbeDataQualityReport`, `build_probe_report()`. Produces every field
-  requested for this milestone (companies attempted/resolved, filings
-  retrieved, events identified, EPS values extracted, standard/custom tag
-  rates, CIK-ticker resolution failures, per-stage attrition funnel) as
-  markdown + JSON, with zero network dependency of its own.
+- **`data_connectors/sec_financial_statement_datasets.py`**:
+  `tag_distribution_diagnostics()` (new) -- top EPS-like tags with
+  count/namespace/accepted-or-rejected, up to 10 examples of tags
+  classified as custom, and a **second, independent** custom-tag rate
+  computed from the `version` column's taxonomy namespace (`us-gaap` etc.)
+  rather than tag-name string matching, reported alongside the existing
+  rate for direct comparison. `fetch_quarter()` now threads `telemetry`
+  through. 11 new unit tests.
 
-- **`backtests/h11_data_probe.py`** (rewired) -- now calls
-  `build_probe_report()` at the end of a run and writes `report.md` /
-  `report.json` alongside the existing per-stage diagnostics. Individual
-  CIK fetch failures (submission lookup, 8-K lookup) are now caught and
-  counted rather than aborting the whole probe run.
+- **`data_connectors/sec_company_tickers.py`, `sec_8k_item202.py`**:
+  `fetch_submission()`, `fetch_company_tickers()`, `fetch_item_202_filings()`
+  now thread `telemetry` through via `instrumented_get()`. `sec_8k_item202.py`'s
+  `fetch_item_202_filings()` docstring now explicitly notes it hits the
+  identical `sec_submissions` endpoint as `fetch_submission()` -- previously
+  an implicit fact, now visible directly in any run's telemetry summary as
+  two same-endpoint requests per attempted CIK.
 
-- **`data_connectors/sec_8k_item202.py`** (bug fix) -- see Validation
-  performed. One line changed (`.astype(str)` added before
-  `.str.contains()`), plus an explanatory comment.
+- **`hypotheses/h11_pead/probe_report.py`**: `eightk_item202_filings_found`
+  renamed to `historical_item202_filings_retrieved` (field, markdown label,
+  and JSON key) with an explicit note added to `STANDARD_NOTES` explaining
+  the metric is each CIK's all-time count, not scoped to the requested
+  quarters -- the exact wording-clarity fix requested. Two new report
+  sections: **SEC connectivity** (from a `RequestTelemetryCollector.summary()`)
+  and **XBRL tag diagnostics** (from `tag_distribution_diagnostics()`), both
+  rendering an explicit "not captured for this run" statement rather than
+  silently omitting the section when the corresponding data isn't supplied.
+  Full per-request detail goes to `report.json` only (`sec_request_records`),
+  keeping the markdown summary readable. 10 tests (4 new).
 
-- **`tests/test_sec_connectors.py`** (regression test added) -- locks in
-  the zero-recent-filings fix.
+- **`backtests/h11_data_probe.py`**: creates one `RequestTelemetryCollector`
+  shared across every SEC request the run makes (identifiers, 8-K lookups,
+  FSDS quarter pull), and calls `tag_distribution_diagnostics()` on the
+  bulk `num_all` alongside the existing `custom_tag_fallback_rate()` call.
+  Both flow into `build_probe_report()`. 7 end-to-end dry-run tests (2 new),
+  now asserting telemetry and tag diagnostics actually populate through the
+  real orchestrator, not just through `build_probe_report()` called directly.
 
-- **`tests/test_h11_data_probe_e2e.py`** (new, 5 tests) -- the first actual
-  execution of `h11_data_probe.py`'s `probe()` function, end to end, with
-  `fetch_submission` / `fetch_quarter` / `fetch_item_202_filings`
-  monkeypatched to fixture data (no network). Not a substitute for a real
-  local run against live SEC data, but closes the gap between "syntax-
-  checked" and "never actually executed," which is where both bugs below
-  were found.
+- **Bundled in, not a separate change**: the `SEC_USER_AGENT` fix from
+  earlier this session (`"Vitaliy Pikalo pikalo.vitaliy@gmail.com"`
+  replacing the `example.com` placeholder) lands in these same connector
+  files' commits, since it was still uncommitted.
+
+**155 -> 179 -> 210 tests pass** across the last three milestones; this one
+adds 31 (16 telemetry + 11 tag diagnostics + 4 probe-report rendering).
 
 ## Why it changed
 
-Directly per this milestone's four numbered requirements: resolve the
-open pre-registration ambiguity via a proper amendment document, add
-deterministic parser fixtures before trusting live data, upgrade the
-probe script to produce a real data-quality report, and continue the
-atomic-commit/REVIEW.md workflow. The architectural confirmation
-(connectors -> event generators -> event contract -> generic framework ->
-stats, generic framework hypothesis-agnostic) was checked against every
-file touched this milestone and is unaffected -- `probe_report.py` lives
-in `hypotheses/h11_pead/`, not `event_study/`, because it's a diagnostic
-over H11-specific event-generation output, not generic pipeline
-machinery.
+Directly per the instrumentation milestone approved after reviewing the
+first real probe: "the remaining issues are mostly observability gaps, not
+evidence the pipeline is wrong" -- this milestone closes exactly those gaps
+(connectivity visibility, tag-rate inspectability, metric-label clarity)
+without touching the extraction rule or the tag-priority list, per explicit
+instruction not to change heuristics until the distribution is understood.
 
 ## New assumptions introduced
 
-- `H11Config.min_seasonal_diffs = 4` (8-quarter minimum history) is now
-  backed by a written rationale (`H11_AMENDMENT_001.md`) instead of only a
-  code comment -- but it is still an **unapproved** proposal pending the
-  sign-off checkbox. No behavior changed; this is a documentation-status
-  change, not a code change.
-- The probe's CIK -> ticker "resolution" is explicitly documented (in
-  `probe_report.py`'s `STANDARD_NOTES`, surfaced in every report) as a
-  **current-ticker-only** proxy, not true point-in-time resolution --
-  `event_study.identifiers.PointInTimeTickerHistory` exists and is
-  fixture-tested, but building the historical valid_from/valid_to table it
-  needs is out of scope for this probe and remains the highest-risk open
-  item per `H11_data_availability_review.md` section 5.
+- `_STANDARD_TAXONOMY_PREFIXES` (`us-gaap`, `dei`, `srt`, `country`,
+  `currency`, `invest`, `stpr`, `naics`, `sic`, `exch`) is used to compute
+  the namespace-based custom-tag rate. This list is XBRL US's commonly-cited
+  standard/shared taxonomies but has not been cross-checked against SEC's
+  complete, authoritative list of every taxonomy it ever accepts -- if a
+  legitimate standard taxonomy is missing from this set, the namespace-based
+  rate would slightly overstate "custom." This is exactly the kind of thing
+  the next real probe run (with `top_tags` visible) should surface if it's
+  a material issue.
+- SEC's rate-limit header names (`Retry-After`, `X-RateLimit-Limit`,
+  `X-RateLimit-Remaining`, `X-RateLimit-Reset`) are assumed opportunistically
+  -- SEC does not formally document sending any of these. If none ever
+  appear, `any_rate_limit_headers_observed` will simply always read `False`,
+  which is itself informative (either SEC never signals limits this way, or
+  this project has never come close to triggering one).
 
 ## New invariants introduced
 
-None. This milestone adds validation and reporting around existing
-invariants (`known_at > period_end`, contiguous cost buckets); it does not
-introduce new ones.
+None. This is instrumentation over existing behavior, not a new rule.
 
 ## Validation performed
 
-- **179 tests pass** (155 prior + 24 new: 10 parser fixtures, 8 probe-report
-  unit tests, 5 end-to-end dry-run tests, 1 connector regression test),
-  `python -m pytest tests/`.
-- **Two real bugs were caught and fixed while building the fixtures and
-  the end-to-end dry run, not just avoided:**
-  1. `backtests/h11_data_probe.py`'s error-handling fallback for a failed
-     `fetch_item_202_filings()` call built an incomplete stub submission
-     dict (missing `accessionNumber`, `filingDate`, `acceptanceDateTime`
-     keys), which crashed `parse_submission_filings_for_item_202()` --
-     meaning the exact code path meant to handle a fetch failure
-     gracefully would itself have crashed the whole probe run on the
-     first CIK that failed to resolve. Fixed by supplying all required
-     parallel-array keys as empty lists.
-  2. `data_connectors/sec_8k_item202.py`'s `parse_submission_filings_
-     for_item_202()` raised `AttributeError: Can only use .str accessor
-     with string values!` on a submission with zero recent filings --
-     pandas infers an empty column as `float64`, not `object`/string, and
-     `.str.contains()` rejects non-string dtypes. This is a real edge
-     case (a genuinely new filer with no filing history yet, or exactly
-     the fallback-stub case bug #1 above exercises) that no fixture with
-     at least one real filing would ever surface. Fixed with `.astype(str)`
-     before `.fillna("").str.contains(...)`; regression-tested directly in
-     `test_sec_connectors.py` and indirectly via the end-to-end test.
-  Both bugs were in error-handling / edge-case code, not in the
-  methodology or the primary happy-path logic -- but both would have
-  caused the probe script to crash on its first real run against any CIK
-  with a lookup failure or sparse filing history, which is a realistic,
-  not a hypothetical, occurrence at small-cap scale.
-- **A third finding, not a crash but a measurement gap**: 
-  `custom_tag_fallback_rate()`'s heuristic (`tag.str.contains(
-  "EarningsPerShare", case=False)`) does not recognize custom tags that
-  abbreviate to "EPS" instead of spelling out "EarningsPerShare" -- such
-  tags are invisible to both the numerator and denominator of the
-  diagnostic, meaning the reported custom-tag fallback rate is a **lower
-  bound**, not an exact figure, wherever this naming pattern occurs.
-  Locked in as a passing, explicitly-named test
-  (`test_custom_tag_using_an_abbreviation_is_invisible_to_the_fallback_
-  diagnostic`) rather than fixed, per this milestone's validation-only
-  scope -- widening the heuristic is a code change that would need its
-  own before/after validation, which is exactly the kind of scope
-  creep this milestone is deliberately avoiding.
-- **What still cannot be validated from this sandbox**: any `fetch_*`
-  function against a live SEC endpoint. The end-to-end dry run
-  (`test_h11_data_probe_e2e.py`) proves the orchestration logic is
-  internally correct against realistically-shaped fixture data; it does
-  not and cannot prove SEC's actual live response matches that shape. The
-  first real local run of `h11_data_probe.py` is still the point at which
-  `sec_8k_item202.py`'s HONESTY FLAG gets resolved one way or the other.
+- **210 tests pass** (`python -m pytest tests/`), all in this milestone
+  synthetic/fixture-based, no network.
+- `instrumented_get()` is tested for behavior-preservation specifically
+  (same return value, same exceptions, same headers/timeout passed through)
+  independent of whether `telemetry` is supplied -- the point being that
+  wiring this into three connectors could not have silently changed what
+  they do.
+- `tag_distribution_diagnostics()`'s namespace-based rate is tested against
+  a case specifically constructed to diverge from the tag-name-based rate
+  (a standard `EarningsPerShareBasic` us-gaap tag outside `EPS_TAG_PRIORITY`)
+  -- confirming the hypothesis raised in the last review (that the 52.3%
+  finding might be partly a heuristic artifact) is at least mechanically
+  real, not confirming it's the actual explanation for the live number,
+  which only a real run's `top_tags` output can settle.
+- The end-to-end dry run (`test_h11_data_probe_e2e.py`) was extended to
+  confirm telemetry and tag diagnostics actually flow through the real
+  `probe()` orchestrator end to end (7 requests recorded across 3 CIKs x 2
+  submissions calls + 1 FSDS pull, matching the now-visible duplicate-
+  endpoint pattern), not just that `build_probe_report()` can render them
+  when handed pre-built inputs directly.
 
 ## Remaining risks
 
-1. **`H11_AMENDMENT_001.md` is unsigned.** Per its own §6, this blocks
-   real SEC data collection specifically on the minimum-history threshold
-   until approved.
-2. **8-K/A amendment fallback (original omits Item 2.02, amendment adds
-   it) is still not implemented** -- explicitly re-confirmed as
-   out-of-scope for this validation-only milestone
-   (`test_sec_parser_fixtures.py::TestEightKAAmendmentCase`), carried
-   forward from the prior milestone's REVIEW.md, not newly discovered.
-3. **The custom-tag fallback-rate heuristic undercounts abbreviated tag
-   names** (new finding, see Validation performed) -- the true custom-tag
-   rate in real data could be higher than what `custom_tag_fallback_rate()`
-   reports. Worth widening the heuristic before the section 13.5
-   diagnostic is treated as final, but not before this milestone.
-4. **The 8-K JSON-shape assumption remains unverified against live data**
-   -- unchanged from the prior milestone, still the first thing to check
-   on the first real local run.
-5. **CIK -> ticker resolution in the probe is current-ticker-only**, not
-   point-in-time -- explicitly flagged in every report's Notes section now
-   (previously only in `H11_data_availability_review.md`), so this
-   limitation surfaces automatically wherever the report is read, not only
-   to a reader who already knows to look for it.
+Carried forward, unchanged by this milestone (instrumentation doesn't fix
+any of these, it makes them measurable):
+
+1. 8-K/A amendment fallback (original omits Item 2.02, amendment adds it)
+   still not implemented.
+2. The 8-K JSON-shape assumption is still unverified against live data.
+3. CIK -> ticker resolution in the probe is still current-ticker-only, not
+   point-in-time.
+
+New, from this milestone:
+
+4. **`_STANDARD_TAXONOMY_PREFIXES` completeness is unverified** (see New
+   assumptions) -- low risk, self-correcting once real `top_tags` data is
+   inspected.
+5. **The duplicate-submissions-endpoint-per-CIK pattern is now visible but
+   not fixed** -- deliberately, per this milestone's instrumentation-only
+   scope. Worth folding into the data-layer design (see Architectural note
+   below) rather than patched ad hoc in the probe script.
+6. **Whether the 52.3% custom-tag rate is real or a heuristic artifact is
+   still unresolved** -- this milestone built the instrument to answer that
+   question; it has not yet been pointed at real data with enough history
+   to answer it. That's the next probe run's job.
+
+## Architectural note, captured for the full-panel design (not implemented this milestone)
+
+The first probe run's low event count (1 of 3) traced to a structural
+issue: the SUE calculation needs up to 8 quarters of trailing EPS history,
+but a probe invoked with only 2 requested quarters can only supply
+whatever comparative-period facts happen to be tagged inside filings
+submitted in that narrow window. This is a data-layer design question, not
+a bug, and the intended shape for the eventual full-panel build has been
+specified (not built) as:
+
+```
+SEC historical facts
+        |
+        v
+point-in-time financial fact store
+        |
+        v
+event generator requests required history window
+        |
+        v
+SUE calculation
+        |
+        v
+event-study framework
+```
+
+The event generator should request the history it needs; the data layer
+should accumulate and serve it. This milestone deliberately does NOT
+implement that fact store -- `backtests/h11_data_probe.py` still requests
+whatever quarters are passed on the command line and works with whatever
+history happens to land inside them, which is fine for a probe whose job is
+proving connectivity and extraction correctness, but is explicitly NOT the
+production design. Building the fact store is its own engineering decision,
+warranting its own design spec (matching this project's standing practice
+of writing a spec before a structural change), and should happen only
+after the wider-window probe (this milestone's next step) confirms the
+8-quarter requirement is well understood empirically, not before.
 
 ## Specific areas where external review should focus
 
-1. **`amendments/H11_AMENDMENT_001.md`'s sample-size impact estimate**
-   (§5) -- it's a desk estimate reasoned from the XBRL mandate's June 2011
-   full-coverage date, not a measured count. Worth checking the reasoning
-   holds before treating the "low-to-mid single-digit percentage" claim as
-   more than a planning aid.
-2. **Whether `min_seasonal_diffs = 4` is the right number at all** -- the
-   amendment argues for it over both the literal 5-quarter floor and the
-   full 12-quarter window, but the choice of exactly 4 (vs. 5, 6, or the
-   full 8) is a judgment call, not a derived value. This is the actual
-   decision the sign-off checkbox is gating.
-3. **The two bugs fixed this milestone** (see Validation performed) --
-   both were found by testing error-handling paths specifically, which
-   raises the question of whether other error-handling branches in the
-   connectors (there aren't many, but `fetch_quarter`'s network-error path
-   is entirely untested even by the new end-to-end fixture, since it never
-   simulates a `fetch_quarter` failure) deserve the same treatment before
-   the real panel run.
-4. **The custom-tag heuristic gap** -- worth an opinion on whether
-   widening it before or after the full panel run is the better
-   sequencing, given it only affects diagnostic reporting accuracy, not
-   which records enter the sample.
+1. **`instrumented_get()`'s error-path telemetry recording**
+   (`data_connectors/telemetry.py`) -- confirm a 4xx/5xx response is always
+   captured with its real status code before `raise_for_status()` raises,
+   under every call site, not just the tested ones.
+2. **The namespace-based vs. tag-name-based custom-tag rate comparison** --
+   whether `_STANDARD_TAXONOMY_PREFIXES` is the right list, and whether the
+   `rates_agree_within_5pct` threshold is a reasonable bar for "these two
+   measurements are telling the same story."
+3. **The duplicate-submissions-request pattern** (Remaining risks item 5) --
+   whether this is worth fixing now (a small dedupe-by-CIK cache) or
+   properly folded into the future fact-store design instead.
+4. **Whether the architectural note above is scoped correctly** -- this
+   milestone treats the point-in-time fact store as future work requiring
+   its own spec; worth confirming that sequencing (wider probe first, fact
+   store design second) rather than jumping straight to the fact store now.
