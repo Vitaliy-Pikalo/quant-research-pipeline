@@ -76,17 +76,26 @@ def patched_probe(monkeypatch, tmp_path):
     sub_rows = cik1_sub + cik3_sub
     num_rows = cik1_num + cik3_num
 
-    def fake_fetch_submission(cik, session=None):
+    def fake_fetch_submission(cik, session=None, telemetry=None):
+        if telemetry is not None:
+            # simulate what the real instrumented_get() would have recorded,
+            # so this fixture exercises the report's telemetry wiring too,
+            # not just the fetch_* return values
+            telemetry.record(endpoint="sec_submissions", http_status=404 if cik == "0000000002" else 200, response_size_bytes=200, elapsed_seconds=0.01)
         if cik == "0000000002":
             raise ConnectionError("simulated: SEC submissions endpoint unreachable for this CIK")
         names = {"0000000001": "Acme Corp", "0000000003": "Gamma Micro Inc"}
         return {"cik": cik.zfill(10), "name": names[cik], "sic_code": "3571", "exchanges": ["Nasdaq"], "former_names": []}
 
-    def fake_fetch_quarter(quarter, session=None):
+    def fake_fetch_quarter(quarter, session=None, telemetry=None):
         assert quarter == "2023q3"
+        if telemetry is not None:
+            telemetry.record(endpoint="sec_fsds_quarter", http_status=200, response_size_bytes=50_000, elapsed_seconds=0.5)
         return pd.DataFrame(sub_rows), pd.DataFrame(num_rows)
 
-    def fake_fetch_item_202_filings(cik, session=None):
+    def fake_fetch_item_202_filings(cik, session=None, telemetry=None):
+        if telemetry is not None:
+            telemetry.record(endpoint="sec_submissions", http_status=404 if cik == "0000000002" else 200, response_size_bytes=200, elapsed_seconds=0.01)
         if cik == "0000000002":
             raise ConnectionError("simulated: SEC submissions endpoint unreachable for this CIK")
         if cik == "0000000001":
@@ -158,3 +167,33 @@ class TestProbeEndToEnd:
         report = json.loads((patched_probe / "report.json").read_text())
         assert report["standard_tag_rate"] == pytest.approx(1.0)
         assert report["custom_tag_fallback_rate"] == pytest.approx(0.0)
+
+    def test_sec_request_telemetry_is_populated_from_the_real_run(self, patched_probe):
+        # confirms the shared RequestTelemetryCollector created inside
+        # probe() actually accumulates records across all three connectors
+        # (submissions x2 per CIK, one FSDS quarter pull) and flows through
+        # to report.json -- not just that build_probe_report() can render a
+        # telemetry section when handed one directly (already covered in
+        # test_h11_probe_report.py)
+        h11_data_probe.probe(ciks=["0000000001", "0000000002", "0000000003"], quarters=["2023q3"])
+        report = json.loads((patched_probe / "report.json").read_text())
+
+        telemetry = report["sec_request_telemetry"]
+        assert telemetry is not None
+        # 3 CIKs x 2 submissions-endpoint calls (identifiers + 8-K) + 1 FSDS quarter pull = 7
+        assert telemetry["total_requests"] == 7
+        assert telemetry["status_code_distribution"].get("404") == 2  # CIK 2's two failed lookups
+        assert telemetry["failed_requests"] == 2
+        assert len(report["sec_request_records"]) == 7
+
+    def test_tag_diagnostics_present_and_consistent_with_the_all_standard_fixture(self, patched_probe):
+        h11_data_probe.probe(ciks=["0000000001", "0000000002", "0000000003"], quarters=["2023q3"])
+        report = json.loads((patched_probe / "report.json").read_text())
+
+        tag_diag = report["tag_diagnostics"]
+        assert tag_diag is not None
+        assert tag_diag["n_eps_like_facts"] == 10  # 8 (CIK1) + 2 (CIK3)
+        assert tag_diag["tag_name_based_custom_rate"] == pytest.approx(0.0)
+        assert tag_diag["namespace_based_custom_rate"] == pytest.approx(0.0)
+        assert tag_diag["rates_agree_within_5pct"] is True
+        assert tag_diag["custom_tag_examples"] == []

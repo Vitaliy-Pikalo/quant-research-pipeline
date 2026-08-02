@@ -18,6 +18,18 @@ result -- per the standing rule, filters are not tuned based on these
 counts. Unexpected attrition is something to investigate as a potential
 data issue, not something to adjust away.
 
+Per the instrumentation milestone that followed H11's first real probe run
+(which completed cleanly but couldn't say whether that reflected healthy
+SEC access or just that nothing happened to fail, and reported a
+surprising 52.3% custom-tag rate with no way to inspect it), this version
+also: shares one data_connectors.telemetry.RequestTelemetryCollector across
+every SEC request made during the run (so the report can answer "did SEC
+access actually work, or did we just not hit a failure"), and runs
+tag_distribution_diagnostics() over the bulk EPS-like facts (so the custom-
+tag rate can be inspected, not just reported as a single number). Neither
+addition changes fetching behavior or extraction rules -- both are purely
+additive instrumentation.
+
 MUST BE RUN LOCALLY. This project's Claude sandbox cannot reach
 data.sec.gov or www.sec.gov (confirmed directly during the H11 data
 availability review -- only pypi.org and github.com resolve from that
@@ -34,10 +46,16 @@ Usage (from repo root, after `pip install -r requirements.txt`):
     python backtests/h11_data_probe.py --ciks 0000320193 0000012927 ... \\
         --quarters 2022q2 2022q3
 
+For a meaningful read on the 8-quarter SUE history requirement specifically
+(not just wiring correctness), request enough trailing quarters to actually
+give firms a chance to clear it -- e.g. 8-12 quarters, not 2.
+
 Outputs, all under data/h11_probe/:
     identifiers.csv        resolved CIK/ticker/SIC per input CIK
     events.csv              generated Event records (up to ~100)
-    report.md, report.json  the data-quality report described above
+    report.md, report.json  the data-quality report described above,
+                             including SEC request telemetry and XBRL tag
+                             diagnostics
     diagnostics/*.json      per-stage StageRunLog files
 """
 from __future__ import annotations
@@ -57,7 +75,9 @@ from data_connectors.sec_financial_statement_datasets import (
     custom_tag_fallback_rate,
     extract_eps_records,
     fetch_quarter,
+    tag_distribution_diagnostics,
 )
+from data_connectors.telemetry import RequestTelemetryCollector
 from event_study.diagnostics import StageRunLog, run_gate, stage_timer
 from hypotheses.h11_pead.config import H11Config
 from hypotheses.h11_pead.event_generator import build_event, compute_sue, determine_known_at
@@ -71,6 +91,7 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
     (OUT_DIR / "diagnostics").mkdir(exist_ok=True)
     config = H11Config()
     session = requests.Session()
+    telemetry = RequestTelemetryCollector()  # shared across every SEC request this run makes
 
     # --- stage 0/1: identifiers + raw EPS pull ---
     ticker_resolution: dict[str, str | None] = {}
@@ -78,10 +99,12 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
     with stage_timer() as t0:
         for cik in ciks:
             try:
-                sub = fetch_submission(cik, session=session)
+                sub = fetch_submission(cik, session=session, telemetry=telemetry)
             except Exception as exc:  # noqa: BLE001 -- deliberately broad: any failure here is a
                 # resolution failure worth counting and reporting, not a
-                # reason to abort the whole probe over one bad CIK
+                # reason to abort the whole probe over one bad CIK. The
+                # underlying HTTP status (if any) is still captured in
+                # `telemetry`, independent of this catch.
                 ticker_resolution[cik] = None
                 identifiers.append({"cik": cik, "name": None, "sic_code": None, "error": str(exc)})
                 continue
@@ -96,7 +119,7 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
 
         sub_frames, num_frames = [], []
         for q in quarters:
-            sub_df, num_df = fetch_quarter(q, session=session)
+            sub_df, num_df = fetch_quarter(q, session=session, telemetry=telemetry)
             sub_frames.append(sub_df)
             num_frames.append(num_df)
         sub_all = pd.concat(sub_frames, ignore_index=True) if sub_frames else pd.DataFrame()
@@ -108,6 +131,9 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
         custom_tag_fallback_rate(num_all)
         if not num_all.empty
         else {"n_eps_like_facts": 0, "n_standard": 0, "n_custom": 0, "custom_fallback_rate": float("nan")}
+    )
+    tag_diag = tag_distribution_diagnostics(num_all) if not num_all.empty else tag_distribution_diagnostics(
+        pd.DataFrame(columns=["tag", "version"])
     )
     stage0_log = StageRunLog(
         stage="stage_0_probe_acquisition",
@@ -135,17 +161,18 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
     )
     events = []
     attempt_outcomes: list[AttemptOutcome] = []
-    eightk_item202_counts: dict[str, int] = {}
+    historical_item202_counts: dict[str, int] = {}
     with stage_timer() as t3:
         for cik in ciks:
             cik_padded = cik.zfill(10)
 
             try:
-                item202 = fetch_item_202_filings(cik_padded, session=session)
+                item202 = fetch_item_202_filings(cik_padded, session=session, telemetry=telemetry)
             except Exception:  # noqa: BLE001 -- same rationale as the identifier fetch above:
                 # a fetch failure for one CIK should not abort the whole probe,
                 # but it must not be silently treated as "no qualifying 8-K"
-                # either -- counted separately below via eightk_item202_counts.
+                # either -- counted separately below via historical_item202_counts,
+                # and the real HTTP status (if any) is still in `telemetry`.
                 # NOTE: this empty stub must supply every parallel-array key
                 # parse_submission_filings_for_item_202 reads unconditionally
                 # (accessionNumber, filingDate), not just "form" -- an
@@ -158,7 +185,7 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
                         "filings": {"recent": {"form": [], "accessionNumber": [], "filingDate": [], "acceptanceDateTime": [], "items": []}},
                     }
                 )
-            eightk_item202_counts[cik_padded] = len(item202)
+            historical_item202_counts[cik_padded] = len(item202)
 
             firm_eps = eps_records[eps_records["cik"] == cik_padded].set_index("period_end")["eps_value"]
             if firm_eps.empty:
@@ -236,10 +263,13 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
         ticker_resolution=ticker_resolution,
         quarters_requested=quarters,
         filings_retrieved_total=len(sub_all),
-        eightk_item202_counts=eightk_item202_counts,
+        historical_item202_counts=historical_item202_counts,
         eps_records=eps_records,
         fallback_diag=fallback_diag,
         attempt_outcomes=attempt_outcomes,
+        telemetry_summary=telemetry.summary(),
+        telemetry_records=telemetry.to_records(),
+        tag_diagnostics=tag_diag,
     )
     report.write(OUT_DIR)
 
