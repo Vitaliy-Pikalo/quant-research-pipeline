@@ -11,15 +11,26 @@ which is what H11_PREREGISTRATION.md section 6 requires as `known_at` --
 NOT `filingDate`, which is calendar-date-only and would throw away exactly
 the intraday precision this design's point-in-time contribution depends on.
 
-HONESTY FLAG: the exact JSON shape parsed here (submissions API's
-filings.recent parallel-array structure, including the `items` and
-`acceptanceDateTime` fields) is implemented against SEC's documented API
-pattern but has not been verified against a live response from this
-sandbox (network to data.sec.gov is unreachable here -- confirmed during
-the H11 data availability review). The parse function's first real use
-against a real submissions payload (via h11_data_probe.py, run locally)
-should specifically check this shape assumption before trusting any output,
-per H11_IMPLEMENTATION_SPEC.md section 4 (stage 0 validation).
+HONESTY FLAG, RESOLVED: the exact JSON shape parsed here (submissions
+API's filings.recent parallel-array structure, including the `items` and
+`acceptanceDateTime` fields) was implemented against SEC's documented API
+pattern before ever being verified against a live response (this sandbox
+cannot reach data.sec.gov). It has since been run live -- see the H11 Phase
+0 probe reports -- and the shape assumption held. What did NOT hold:
+`acceptance_datetime` was parsed as whatever timezone SEC sends (UTC, via
+the "Z" suffix on `acceptanceDateTime`) and left there, never converted to
+US/Eastern. H11_PREREGISTRATION.md section 6 and event_study.schemas.Event
+both require `known_at` to be interpretable in US/Eastern for the 4pm-ET
+same-day-vs-next-day entry rule. A real probe run surfaced this directly:
+an event built from an 8-K's acceptance_datetime carried a `+00:00` (UTC)
+offset while the 10-Q-fallback path's `known_at` correctly carried `-04:00`
+(Eastern) -- the exact kind of point-in-time-precision bug this project's
+rigor stack exists to catch. Fixed below by converting to US/Eastern at
+parse time, the same way h11_data_probe.py's 10-Q fallback path already
+did; see tests/test_sec_connectors.py's
+TestAcceptanceDatetimeTimezoneConversion for the regression coverage
+(UTC input, Eastern conversion correctness across a DST boundary, and the
+4pm-ET cutoff behavior via determine_entry_date).
 """
 from __future__ import annotations
 
@@ -46,6 +57,16 @@ def parse_submission_filings_for_item_202(raw_submission: dict) -> pd.DataFrame:
     Returns columns: cik, accession_number, form, items, filing_date,
     acceptance_datetime (this last one is `known_at` for a primary-source
     H11 event, per section 4/6 of the pre-registration).
+
+    acceptance_datetime is returned tz-aware in US/Eastern, not the UTC SEC
+    sends it in -- H11_PREREGISTRATION.md section 6's 4pm-ET entry rule and
+    event_study.schemas.Event both require this. `utc=True` forces a
+    tz-aware UTC interpretation even if a given record's timestamp string
+    happens to lack an explicit offset (defensive; SEC's own
+    acceptanceDateTime values are documented to always include one), then
+    `.tz_convert` maps to Eastern -- the identical pattern
+    h11_data_probe.py's 10-Q-fallback path already used for `filed`, now
+    applied here too so both known_at sources are consistent.
     """
     cik = str(raw_submission["cik"]).zfill(10)
     recent = raw_submission["filings"]["recent"]
@@ -75,7 +96,7 @@ def parse_submission_filings_for_item_202(raw_submission: dict) -> pd.DataFrame:
     result = df[is_8k & has_202].copy()
 
     result["filing_date"] = pd.to_datetime(result["filing_date"])
-    result["acceptance_datetime"] = pd.to_datetime(result["acceptance_datetime"])
+    result["acceptance_datetime"] = pd.to_datetime(result["acceptance_datetime"], utc=True).dt.tz_convert("US/Eastern")
     return result[["cik", "accession_number", "form", "items", "filing_date", "acceptance_datetime"]].reset_index(
         drop=True
     )

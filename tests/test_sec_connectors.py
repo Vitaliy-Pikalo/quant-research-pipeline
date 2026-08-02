@@ -8,6 +8,8 @@ from data_connectors.sec_financial_statement_datasets import (
     extract_eps_records,
 )
 from data_connectors.sec_8k_item202 import parse_submission_filings_for_item_202
+from hypotheses.h11_pead.config import H11Config
+from hypotheses.h11_pead.event_generator import determine_entry_date
 
 
 class TestParseCompanyTickers:
@@ -194,3 +196,98 @@ class TestParseItem202Filings:
         }
         out = parse_submission_filings_for_item_202(raw)
         assert len(out) == 0
+
+
+class TestAcceptanceDatetimeTimezoneConversion:
+    """
+    Regression coverage for a real bug found by the H11 Phase 0 probe's
+    second real run (11-quarter window): an event built from an 8-K's
+    acceptance_datetime carried a UTC (+00:00) offset instead of US/Eastern
+    (-04:00/-05:00), while the 10-Q-fallback known_at path -- which does its
+    own explicit tz_convert in h11_data_probe.py -- was correct. This
+    matters because H11_PREREGISTRATION.md section 6's entry rule (same-day
+    close if known_at is before 4pm ET, next trading day's close otherwise)
+    is defined in wall-clock Eastern time; a known_at still carrying a UTC
+    offset would compare against the wrong hour.
+
+    Three things are tested here, matching what was asked for explicitly:
+    the raw UTC input, the Eastern conversion's correctness (including
+    across a DST boundary, so this isn't accidentally only correct half the
+    year), and the actual 4pm-ET cutoff decision once a real
+    parse_submission_filings_for_item_202 output flows into
+    determine_entry_date -- proving the fix resolves the bug's actual
+    real-world consequence, not just that a timestamp LOOKS different.
+    """
+
+    def _raw_submission_with_one_8k(self, accession_datetime_utc: str) -> dict:
+        return {
+            "cik": 1,
+            "filings": {
+                "recent": {
+                    "form": ["8-K"],
+                    "accessionNumber": ["a1"],
+                    "filingDate": [accession_datetime_utc[:10]],
+                    "acceptanceDateTime": [accession_datetime_utc],
+                    "items": ["2.02"],
+                }
+            },
+        }
+
+    def test_summer_utc_input_converts_to_edt_minus_4_hours(self):
+        # 2022-08-02T21:14:34Z -- the exact real value from the live probe
+        # run that surfaced this bug
+        out = parse_submission_filings_for_item_202(self._raw_submission_with_one_8k("2022-08-02T21:14:34.000Z"))
+        ts = out.iloc[0]["acceptance_datetime"]
+        assert str(ts.tzinfo) == "US/Eastern"
+        assert ts.utcoffset() == pd.Timedelta(hours=-4)  # EDT
+        assert (ts.hour, ts.minute, ts.second) == (17, 14, 34)
+
+    def test_winter_utc_input_converts_to_est_minus_5_hours(self):
+        # DST boundary check -- a fix that's only correct in summer isn't
+        # actually correct
+        out = parse_submission_filings_for_item_202(self._raw_submission_with_one_8k("2022-01-14T21:00:00.000Z"))
+        ts = out.iloc[0]["acceptance_datetime"]
+        assert ts.utcoffset() == pd.Timedelta(hours=-5)  # EST
+        assert ts.hour == 16
+
+    def test_after_4pm_et_cutoff_rolls_to_next_trading_day(self):
+        # 21:14 UTC = 17:14 EDT -- after the 4pm ET cutoff. Before the fix,
+        # this timestamp would have carried a +00:00 offset and been
+        # compared against the cutoff as if 21:14 were already Eastern
+        # wall-clock time (itself also after 16:00, so this specific case
+        # wouldn't have flipped the answer -- but see the next two tests,
+        # where it would have).
+        out = parse_submission_filings_for_item_202(self._raw_submission_with_one_8k("2022-08-02T21:14:34.000Z"))
+        known_at = out.iloc[0]["acceptance_datetime"]
+        trading_days = pd.bdate_range("2022-08-01", "2022-08-05")
+
+        entry_date = determine_entry_date(known_at, trading_days, H11Config())
+        assert entry_date == pd.Timestamp("2022-08-03")  # next trading day after Aug 2
+
+    def test_before_4pm_et_cutoff_uses_same_trading_day(self):
+        # 15:30 EDT -- clearly before the 4pm ET cutoff, sent as
+        # 2022-08-02T19:30:00Z
+        out = parse_submission_filings_for_item_202(self._raw_submission_with_one_8k("2022-08-02T19:30:00.000Z"))
+        known_at = out.iloc[0]["acceptance_datetime"]
+        trading_days = pd.bdate_range("2022-08-01", "2022-08-05")
+
+        entry_date = determine_entry_date(known_at, trading_days, H11Config())
+        assert entry_date == pd.Timestamp("2022-08-02")  # same trading day
+
+    def test_utc_hour_in_the_bug_risk_zone_is_now_handled_correctly(self):
+        # 2022-08-02T18:30:00Z = 14:30 EDT -- BEFORE the 4pm ET cutoff, so
+        # entry should be same-day. Pre-fix, this timestamp's numeric hour
+        # (18) would have been read as if it were already Eastern wall-clock
+        # time -- 18:00 is AFTER 16:00, which would have wrongly rolled
+        # entry to the next trading day even though the true Eastern time
+        # (14:30) was still before the cutoff. This is the specific failure
+        # mode the fix corrects; the previous tests establish the conversion
+        # and cutoff mechanics, this one demonstrates the bug would have
+        # produced the wrong entry_date without it.
+        out = parse_submission_filings_for_item_202(self._raw_submission_with_one_8k("2022-08-02T18:30:00.000Z"))
+        known_at = out.iloc[0]["acceptance_datetime"]
+        assert known_at.hour == 14  # correctly converted to Eastern, not left at 18 (UTC)
+
+        trading_days = pd.bdate_range("2022-08-01", "2022-08-05")
+        entry_date = determine_entry_date(known_at, trading_days, H11Config())
+        assert entry_date == pd.Timestamp("2022-08-02")  # same trading day, per the TRUE Eastern time
