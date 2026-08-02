@@ -1,6 +1,6 @@
 # H11 Amendment 001 — minimum XBRL history requirement for SUE construction
 
-**Status: proposed, not yet approved. No real SEC data has been pulled and
+**Status: APPROVED (2026-08-01). No real SEC data has been pulled and
 no return, IC, Sharpe, or p-value has been computed under this design.**
 
 This amendment does not modify `results/H11_PREREGISTRATION.md`. Per this
@@ -169,16 +169,22 @@ necessary.
 
 ## 6. Approval status
 
-- [ ] approved by: __________________  date: __________
+- [x] approved by: vitaliy  date: 2026-08-01
 
-**Real SEC data collection under H11 does not proceed on this specific
-point — the `min_seasonal_diffs` / minimum-history threshold — until this
-box is checked.** Work that does not depend on the resolved threshold (SEC
-connector fixtures, probe-script scaffolding, matched-control and cost-model
-code, all already committed) is unaffected and continues under the existing
-implementation-rules workflow. The threshold currently coded in
-`H11Config.min_seasonal_diffs = 4` reflects the proposal in §3 above and is
-already in the committed codebase (see `hypotheses/h11_pead/config.py`,
-committed at `6474c6d`) — this amendment formalizes that choice rather than
-introducing a new one, and remains open pending explicit sign-off before
-any figure computed under it is treated as final.
+**Approved as written.** `min_seasonal_diffs = 4` (8-quarter minimum
+history) is confirmed as the operational threshold and is not to be
+adjusted further. Rationale accepted in full: the original 5-quarter floor
+was not arithmetically compatible with the pre-registered SUE volatility
+calculation; the conflict was discovered through implementation
+requirements, not after seeing any result; the change affects measurement
+feasibility (how much trailing history is required before SUE can be
+computed at all), not the economic hypothesis under test; and the smallest
+history window that still supports the pre-specified calculation is
+preferable to an unnecessarily longer lookback that would shrink the
+sample for no methodological benefit.
+
+The threshold currently coded in `H11Config.min_seasonal_diffs = 4`
+(`hypotheses/h11_pead/config.py`, committed at `6474c6d`) required no code
+change as a result of this approval — this amendment formalizes a choice
+already implemented, per §3 above. Real SEC data collection under H11 may
+now proceed on this point.

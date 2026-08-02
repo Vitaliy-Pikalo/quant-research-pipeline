@@ -22,19 +22,19 @@ class H11Config:
     sue_lag_quarters: int = 4  # seasonal (year-over-year) difference
     sue_volatility_window_quarters: int = 8  # trailing window for std(d)
 
-    # AMBIGUITY FLAGGED DURING IMPLEMENTATION, NOT YET RESOLVED IN THE
-    # FROZEN PRE-REGISTRATION -- see H11_IMPLEMENTATION_REVIEW.md and the
-    # module docstring in event_generator.py. Section 3 of the
-    # pre-registration states "5 consecutive quarters" as the minimum XBRL
-    # history requirement, but the SUE formula in section 5 needs at least
-    # two trailing seasonal differences to compute a non-degenerate std,
-    # which requires 6 quarters at an absolute floor and up to
-    # sue_lag_quarters + sue_volatility_window_quarters = 12 quarters for
-    # the full-window calculation the pre-registration describes. This
-    # implementation uses a separately-named, explicit parameter
-    # (min_seasonal_diffs) rather than silently reinterpreting "5
-    # consecutive quarters" -- see the amendment recommendation in
-    # H11_IMPLEMENTATION_REVIEW.md before this is used against real data.
+    # AMBIGUITY FLAGGED DURING IMPLEMENTATION, RESOLVED VIA
+    # amendments/H11_AMENDMENT_001.md (APPROVED 2026-08-01). Section 3 of
+    # the frozen pre-registration states "5 consecutive quarters" as the
+    # minimum XBRL history requirement, but the SUE formula in section 5
+    # needs at least two trailing seasonal differences to compute a
+    # non-degenerate std, which requires 6 quarters at an absolute floor
+    # and up to sue_lag_quarters + sue_volatility_window_quarters = 12
+    # quarters for the full-window calculation the pre-registration
+    # describes. Rather than silently reinterpreting "5 consecutive
+    # quarters," this was resolved through a formal amendment (not an edit
+    # to results/H11_PREREGISTRATION.md, which remains frozen and
+    # unmodified) -- see amendments/H11_AMENDMENT_001.md for the full
+    # reasoning and approval record.
     min_seasonal_diffs: int = 4  # requires sue_lag_quarters + min_seasonal_diffs = 8 quarters minimum
 
     # Section 4: event definition

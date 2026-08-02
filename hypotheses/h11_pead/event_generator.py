@@ -14,7 +14,7 @@ H11_PREREGISTRATION.md sections 4-6:
     (section 4)
   - determine_entry_date(): the 4pm-ET same-day-vs-next-day rule (section 6)
 
-IMPLEMENTATION-TIME AMBIGUITY, FLAGGED RATHER THAN SILENTLY RESOLVED:
+IMPLEMENTATION-TIME AMBIGUITY, FLAGGED AND FORMALLY RESOLVED:
 H11_PREREGISTRATION.md section 3 states "5 consecutive quarters" of XBRL
 history as the minimum requirement, described as what's "needed to compute
 a seasonal SUE with an 8-quarter volatility window and at least one
@@ -22,14 +22,14 @@ a seasonal SUE with an 8-quarter volatility window and at least one
 difference d(t) = EPS(t) - EPS(t-4) needs 5 quarters, but a *standard
 deviation* of seasonal differences -- which the formula in section 5
 requires -- needs at least two d(t) values (6 quarters minimum), and the
-full 8-quarter volatility window described needs up to 12. This
-implementation does NOT silently pick an interpretation and call it done --
-see H11Config.min_seasonal_diffs (hypotheses/h11_pead/config.py) for the
-explicit, separately-documented parameter used here, and
-H11_IMPLEMENTATION_REVIEW.md for the recommendation that this gets a formal
-pre-registration amendment before real data is pulled, per this project's
-standing rule that ambiguities affecting the pre-registered methodology are
-never resolved silently mid-implementation.
+full 8-quarter volatility window described needs up to 12. This was not
+silently resolved by picking an interpretation -- it went through a formal
+amendment, amendments/H11_AMENDMENT_001.md, approved 2026-08-01, which
+adopts an 8-quarter minimum (H11Config.min_seasonal_diffs = 4, see
+hypotheses/h11_pead/config.py) without editing the frozen
+H11_PREREGISTRATION.md itself, per this project's standing rule that
+ambiguities affecting the pre-registered methodology are never resolved
+silently mid-implementation.
 """
 from __future__ import annotations
 
