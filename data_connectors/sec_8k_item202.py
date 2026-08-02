@@ -26,7 +26,9 @@ from __future__ import annotations
 import pandas as pd
 import requests
 
-SEC_USER_AGENT = "quant-research-pipeline research@example.com"  # replace with a real contact before running live
+from data_connectors.telemetry import RequestTelemetryCollector, instrumented_get
+
+SEC_USER_AGENT = "Vitaliy Pikalo pikalo.vitaliy@gmail.com"  # real identifying contact per SEC's fair-access policy
 SUBMISSIONS_URL_TMPL = "https://data.sec.gov/submissions/CIK{cik:0>10}.json"
 
 ITEM_202_PATTERN = r"2\.02"
@@ -79,9 +81,24 @@ def parse_submission_filings_for_item_202(raw_submission: dict) -> pd.DataFrame:
     )
 
 
-def fetch_item_202_filings(cik: str, session: requests.Session | None = None) -> pd.DataFrame:  # pragma: no cover -- network
+def fetch_item_202_filings(
+    cik: str, session: requests.Session | None = None, telemetry: RequestTelemetryCollector | None = None
+) -> pd.DataFrame:  # pragma: no cover -- network
+    """
+    NOTE surfaced by telemetry, not changed here (out of scope for this
+    instrumentation-only milestone): this hits the exact same
+    data.sec.gov/submissions/CIK##########.json endpoint as
+    sec_company_tickers.fetch_submission(). A probe run currently makes two
+    separate requests per CIK to the identical URL -- one for identifiers,
+    one for 8-K detection -- rather than fetching it once and reusing the
+    payload. Endpoint label is deliberately "sec_submissions" (matching
+    fetch_submission's label, not a distinct one), so this duplication is
+    visible in the telemetry summary rather than hidden behind two
+    differently-named endpoints that look unrelated.
+    """
     session = session or requests.Session()
     url = SUBMISSIONS_URL_TMPL.format(cik=int(cik))
-    resp = session.get(url, headers={"User-Agent": SEC_USER_AGENT}, timeout=30)
-    resp.raise_for_status()
+    resp = instrumented_get(
+        session, url, headers={"User-Agent": SEC_USER_AGENT}, timeout=30, endpoint_label="sec_submissions", telemetry=telemetry
+    )
     return parse_submission_filings_for_item_202(resp.json())

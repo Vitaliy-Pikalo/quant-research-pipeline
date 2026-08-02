@@ -28,7 +28,9 @@ from __future__ import annotations
 import pandas as pd
 import requests
 
-SEC_USER_AGENT = "quant-research-pipeline research@example.com"  # replace with a real contact before running live
+from data_connectors.telemetry import RequestTelemetryCollector, instrumented_get
+
+SEC_USER_AGENT = "Vitaliy Pikalo pikalo.vitaliy@gmail.com"  # real identifying contact per SEC's fair-access policy
 COMPANY_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL_TMPL = "https://data.sec.gov/submissions/CIK{cik:0>10}.json"
 
@@ -66,16 +68,27 @@ def parse_submission(raw: dict) -> dict:
     }
 
 
-def fetch_company_tickers(session: requests.Session | None = None) -> pd.DataFrame:  # pragma: no cover -- network
+def fetch_company_tickers(
+    session: requests.Session | None = None, telemetry: RequestTelemetryCollector | None = None
+) -> pd.DataFrame:  # pragma: no cover -- network
     session = session or requests.Session()
-    resp = session.get(COMPANY_TICKERS_URL, headers={"User-Agent": SEC_USER_AGENT}, timeout=30)
-    resp.raise_for_status()
+    resp = instrumented_get(
+        session,
+        COMPANY_TICKERS_URL,
+        headers={"User-Agent": SEC_USER_AGENT},
+        timeout=30,
+        endpoint_label="sec_company_tickers",
+        telemetry=telemetry,
+    )
     return parse_company_tickers(resp.json())
 
 
-def fetch_submission(cik: str, session: requests.Session | None = None) -> dict:  # pragma: no cover -- network
+def fetch_submission(
+    cik: str, session: requests.Session | None = None, telemetry: RequestTelemetryCollector | None = None
+) -> dict:  # pragma: no cover -- network
     session = session or requests.Session()
     url = SUBMISSIONS_URL_TMPL.format(cik=int(cik))
-    resp = session.get(url, headers={"User-Agent": SEC_USER_AGENT}, timeout=30)
-    resp.raise_for_status()
+    resp = instrumented_get(
+        session, url, headers={"User-Agent": SEC_USER_AGENT}, timeout=30, endpoint_label="sec_submissions", telemetry=telemetry
+    )
     return parse_submission(resp.json())
