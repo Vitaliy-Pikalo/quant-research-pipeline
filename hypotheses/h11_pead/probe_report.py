@@ -9,7 +9,8 @@ produce reliable, point-in-time-safe data at small scale before any real
 panel is pulled -- not to produce a return, an IC, or anything resembling a
 backtest result. This module assembles that proof into one structured
 report: how many companies resolved, how many filings and events were
-found, what fraction of EPS facts needed a fallback tag, and a full
+found, what fraction of EPS facts needed a fallback tag, whether SEC access
+itself was actually healthy (not just "nothing crashed"), and a full
 attrition funnel showing exactly where every attempted firm-quarter that
 didn't produce a usable event was lost.
 
@@ -17,8 +18,9 @@ Deliberately split from backtests/h11_data_probe.py: everything here is a
 pure function of already-fetched data (no network), so it can be unit-
 tested against fixtures exactly like every other parser in this project --
 see tests/test_h11_probe_report.py. h11_data_probe.py's job is only to
-fetch real data and pass it to build_probe_report(); this module's job is
-only to summarize it correctly.
+fetch real data (and the request telemetry / tag diagnostics that come with
+it) and pass it to build_probe_report(); this module's job is only to
+summarize it correctly.
 
 This is a diagnostic over H11's own event-generation stage output, not a
 generic pipeline module -- it belongs here (hypotheses/h11_pead/), not in
@@ -67,13 +69,16 @@ class ProbeDataQualityReport:
     cik_ticker_resolution_failures: int
     quarters_requested: list[str]
     filings_retrieved_total: int
-    eightk_item202_filings_found: int
+    historical_item202_filings_retrieved: int
     eps_records_extracted: int
     standard_tag_rate: float | None
     custom_tag_fallback_rate: float | None
     events_identified: int
     attrition: pd.DataFrame
     notes: list[str] = field(default_factory=list)
+    sec_request_telemetry: dict | None = None
+    sec_request_records: list[dict] | None = None
+    tag_diagnostics: dict | None = None
 
     def to_markdown(self) -> str:
         lines = [
@@ -91,15 +96,24 @@ class ProbeDataQualityReport:
             f"- CIKs with a resolved current ticker: {self.ciks_ticker_resolved}",
             f"- CIK -> ticker resolution failures: {self.cik_ticker_resolution_failures}",
             "",
+            "## SEC connectivity",
+            "",
+            *self._telemetry_markdown_lines(),
+            "",
             "## Filings and events",
             "",
             f"- Quarters requested: {', '.join(self.quarters_requested) or '(none)'}",
             f"- Total filings retrieved (bulk sub.txt rows, all filers, requested quarters): {self.filings_retrieved_total}",
-            f"- 8-K Item 2.02 filings found (attempted CIKs only): {self.eightk_item202_filings_found}",
+            f"- Historical Item 2.02 filings retrieved (attempted CIKs' full filing history, NOT scoped to "
+            f"the requested quarters -- see Notes): {self.historical_item202_filings_retrieved}",
             f"- EPS records extracted: {self.eps_records_extracted}",
             f"- Standard-tag extraction rate: {self._fmt_pct(self.standard_tag_rate)}",
             f"- Custom-tag fallback rate: {self._fmt_pct(self.custom_tag_fallback_rate)}",
             f"- Events identified (fully resolved, Event constructed): {self.events_identified}",
+            "",
+            "## XBRL tag diagnostics",
+            "",
+            *self._tag_diagnostics_markdown_lines(),
             "",
             "## Attrition funnel",
             "",
@@ -116,6 +130,52 @@ class ProbeDataQualityReport:
             lines.extend(f"- {n}" for n in self.notes)
             lines.append("")
         return "\n".join(lines)
+
+    def _telemetry_markdown_lines(self) -> list[str]:
+        if self.sec_request_telemetry is None:
+            return ["(no request telemetry captured for this run)"]
+        t = self.sec_request_telemetry
+        status_dist = ", ".join(f"{k}: {v}" for k, v in t["status_code_distribution"].items()) or "(no requests)"
+        return [
+            f"- Total SEC requests made: {t['total_requests']}",
+            f"- Status code distribution: {status_dist}",
+            f"- Failed requests (error or 4xx/5xx): {t['failed_requests']}",
+            f"- Rate-limit headers observed at any point: {t['any_rate_limit_headers_observed']}",
+            f"- Total response bytes: {t['total_response_bytes']:,}",
+            f"- Total time spent on SEC requests: {t['total_elapsed_seconds']:.2f}s",
+            "- This answers whether the pipeline worked because SEC access was "
+            "genuinely healthy, or because nothing happened to fail -- a clean "
+            "run with 0 failed requests here is a materially stronger claim "
+            "than a clean run where this section was simply absent.",
+        ]
+
+    def _tag_diagnostics_markdown_lines(self) -> list[str]:
+        if self.tag_diagnostics is None or not self.tag_diagnostics.get("n_eps_like_facts"):
+            return ["(no tag diagnostics captured for this run)"]
+        d = self.tag_diagnostics
+        lines = [
+            f"- EPS-like facts inspected: {d['n_eps_like_facts']}",
+            f"- Tag-name-based custom rate (same definition as the Custom-tag fallback rate above): "
+            f"{self._fmt_pct(d['tag_name_based_custom_rate'])}",
+            f"- Namespace-based custom rate (via the `version` column's taxonomy prefix, an independent "
+            f"signal): {self._fmt_pct(d['namespace_based_custom_rate'])}",
+            f"- The two rates agree within 5 points: {d['rates_agree_within_5pct']}"
+            + ("" if d["rates_agree_within_5pct"] else " -- investigate before trusting either rate alone"),
+            "",
+            "**Top EPS-like tags encountered:**",
+            "",
+            "| tag | namespace | count | accepted |",
+            "|---|---|---|---|",
+        ]
+        for row in d["top_tags"]:
+            lines.append(f"| {row['tag']} | {row['namespace']} | {row['count']} | {row['accepted']} |")
+        if d["custom_tag_examples"]:
+            lines.append("")
+            lines.append("**Examples of tags classified as custom (not in the current tag-priority list):**")
+            lines.append("")
+            for ex in d["custom_tag_examples"]:
+                lines.append(f"- `{ex['tag']}` (namespace: `{ex['namespace']}`)")
+        return lines
 
     def _attrition_markdown(self) -> str:
         # Hand-rolled rather than DataFrame.to_markdown(), which requires
@@ -145,7 +205,7 @@ class ProbeDataQualityReport:
             "cik_ticker_resolution_failures": self.cik_ticker_resolution_failures,
             "quarters_requested": self.quarters_requested,
             "filings_retrieved_total": self.filings_retrieved_total,
-            "eightk_item202_filings_found": self.eightk_item202_filings_found,
+            "historical_item202_filings_retrieved": self.historical_item202_filings_retrieved,
             "eps_records_extracted": self.eps_records_extracted,
             "standard_tag_rate": self.standard_tag_rate,
             "custom_tag_fallback_rate": self.custom_tag_fallback_rate,
@@ -156,6 +216,9 @@ class ProbeDataQualityReport:
             # the actual key name rather than assuming it)
             "attrition": self.attrition.rename_axis("reason").reset_index().to_dict(orient="records"),
             "notes": self.notes,
+            "sec_request_telemetry": self.sec_request_telemetry,
+            "sec_request_records": self.sec_request_records,
+            "tag_diagnostics": self.tag_diagnostics,
         }
         return d
 
@@ -190,6 +253,21 @@ STANDARD_NOTES = [
     "tests/test_sec_parser_fixtures.py's TestEightKAAmendmentCase for the "
     "locked-in current behavior. Any firm-quarter affected by this will "
     "show up as a 10q_fallback event, not a missing one.",
+    "'Historical Item 2.02 filings retrieved' is each attempted CIK's "
+    "ENTIRE filing history (the per-CIK submissions endpoint is not "
+    "quarter-scoped), not filings within the requested quarters -- a large "
+    "number here does not mean a large number of matches within this "
+    "probe's date window. This does not affect event construction "
+    "(determine_known_at only matches an 8-K within the pre-registered "
+    "fallback window of a specific 10-Q), only this metric's label.",
+    "sec_8k_item202.fetch_item_202_filings() and sec_company_tickers."
+    "fetch_submission() currently hit the exact same data.sec.gov/"
+    "submissions/CIK##########.json endpoint separately per CIK, rather "
+    "than fetching it once and reusing the payload -- visible directly in "
+    "the SEC connectivity section above as two 'sec_submissions' requests "
+    "per attempted CIK. Not fixed in this milestone (telemetry is meant to "
+    "surface this kind of thing, not silently correct it); worth folding "
+    "into the full-panel data-layer design rather than patched ad hoc here.",
 ]
 
 
@@ -199,11 +277,14 @@ def build_probe_report(
     ticker_resolution: dict[str, str | None],
     quarters_requested: list[str],
     filings_retrieved_total: int,
-    eightk_item202_counts: dict[str, int],
+    historical_item202_counts: dict[str, int],
     eps_records: pd.DataFrame,
     fallback_diag: dict,
     attempt_outcomes: list[AttemptOutcome],
     extra_notes: list[str] | None = None,
+    telemetry_summary: dict | None = None,
+    telemetry_records: list[dict] | None = None,
+    tag_diagnostics: dict | None = None,
 ) -> ProbeDataQualityReport:
     """
     Pure assembly function -- takes already-fetched/already-computed pieces
@@ -215,9 +296,10 @@ def build_probe_report(
     ticker_resolution : cik -> resolved ticker string, or None if
         resolution failed for that CIK (submission fetch failed, or
         returned no usable ticker).
-    eightk_item202_counts : cik -> number of qualifying 8-K Item 2.02
-        filings found for that CIK (from parse_submission_filings_for_item_202
-        applied per attempted CIK).
+    historical_item202_counts : cik -> number of qualifying 8-K Item 2.02
+        filings found for that CIK's ENTIRE filing history (from
+        parse_submission_filings_for_item_202 applied per attempted CIK) --
+        NOT scoped to quarters_requested, see STANDARD_NOTES.
     eps_records : output of data_connectors.sec_financial_statement_datasets
         .extract_eps_records() over the requested quarters (not filtered to
         the attempted CIKs -- this is the full bulk-quarter extraction, so
@@ -230,6 +312,17 @@ def build_probe_report(
         attempted through the full pipeline (identifiers -> SUE ->
         known_at -> build_event), in the order they were processed. This is
         what the attrition funnel is built from.
+    telemetry_summary : output of a data_connectors.telemetry.
+        RequestTelemetryCollector's .summary(), covering every fetch_* call
+        made during this probe run. None means no telemetry was collected
+        (report says so explicitly rather than implying a clean run).
+    telemetry_records : the same collector's .to_records() -- full
+        per-request detail, written to report.json only (not the markdown
+        summary, to keep the human-readable report from ballooning on a
+        larger run).
+    tag_diagnostics : output of data_connectors.sec_financial_statement_datasets
+        .tag_distribution_diagnostics() over the same num_df used to build
+        eps_records and fallback_diag.
     """
     resolved = {cik: t for cik, t in ticker_resolution.items() if t}
     ciks_ticker_resolved = len(resolved)
@@ -249,11 +342,14 @@ def build_probe_report(
         cik_ticker_resolution_failures=resolution_failures,
         quarters_requested=list(quarters_requested),
         filings_retrieved_total=filings_retrieved_total,
-        eightk_item202_filings_found=sum(eightk_item202_counts.values()),
+        historical_item202_filings_retrieved=sum(historical_item202_counts.values()),
         eps_records_extracted=len(eps_records),
         standard_tag_rate=(1.0 - fallback_diag["custom_fallback_rate"]) if fallback_diag.get("n_eps_like_facts") else None,
         custom_tag_fallback_rate=fallback_diag.get("custom_fallback_rate"),
         events_identified=events_identified,
         attrition=attrition,
         notes=notes,
+        sec_request_telemetry=telemetry_summary,
+        sec_request_records=telemetry_records,
+        tag_diagnostics=tag_diagnostics,
     )

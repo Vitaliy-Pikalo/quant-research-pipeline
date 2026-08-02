@@ -34,7 +34,7 @@ class TestIdentifierResolutionCounts:
             ticker_resolution={"0000000001": "AAA", "0000000002": None, "0000000003": "CCC"},
             quarters_requested=["2023q3"],
             filings_retrieved_total=100,
-            eightk_item202_counts={},
+            historical_item202_counts={},
             eps_records=_eps_records(0),
             fallback_diag={"n_eps_like_facts": 0, "n_standard": 0, "n_custom": 0, "custom_fallback_rate": float("nan")},
             attempt_outcomes=[],
@@ -49,7 +49,7 @@ class TestIdentifierResolutionCounts:
             ticker_resolution={"0000000001": None, "0000000002": None},
             quarters_requested=["2023q3"],
             filings_retrieved_total=0,
-            eightk_item202_counts={},
+            historical_item202_counts={},
             eps_records=_eps_records(0),
             fallback_diag={"n_eps_like_facts": 0, "n_standard": 0, "n_custom": 0, "custom_fallback_rate": float("nan")},
             attempt_outcomes=[],
@@ -65,7 +65,7 @@ class TestTagRates:
             ticker_resolution={"0000000001": "AAA"},
             quarters_requested=["2023q3"],
             filings_retrieved_total=10,
-            eightk_item202_counts={"0000000001": 1},
+            historical_item202_counts={"0000000001": 1},
             eps_records=_eps_records(3),
             fallback_diag={"n_eps_like_facts": 10, "n_standard": 7, "n_custom": 3, "custom_fallback_rate": 0.3},
             attempt_outcomes=[],
@@ -81,7 +81,7 @@ class TestTagRates:
             ticker_resolution={"0000000001": "AAA"},
             quarters_requested=["2023q3"],
             filings_retrieved_total=0,
-            eightk_item202_counts={},
+            historical_item202_counts={},
             eps_records=_eps_records(0),
             fallback_diag={"n_eps_like_facts": 0, "n_standard": 0, "n_custom": 0, "custom_fallback_rate": float("nan")},
             attempt_outcomes=[],
@@ -104,7 +104,7 @@ class TestAttritionFunnelAndEventCount:
             ticker_resolution={str(i): f"T{i}" for i in range(1, 6)},
             quarters_requested=["2023q3"],
             filings_retrieved_total=50,
-            eightk_item202_counts={},
+            historical_item202_counts={},
             eps_records=_eps_records(2),
             fallback_diag={"n_eps_like_facts": 5, "n_standard": 5, "n_custom": 0, "custom_fallback_rate": 0.0},
             attempt_outcomes=outcomes,
@@ -122,7 +122,7 @@ class TestAttritionFunnelAndEventCount:
             ticker_resolution={},
             quarters_requested=[],
             filings_retrieved_total=0,
-            eightk_item202_counts={},
+            historical_item202_counts={},
             eps_records=_eps_records(0),
             fallback_diag={"n_eps_like_facts": 0, "n_standard": 0, "n_custom": 0, "custom_fallback_rate": float("nan")},
             attempt_outcomes=[],
@@ -141,7 +141,7 @@ class TestReportRendering:
             ticker_resolution={"1": "AAA", "2": None},
             quarters_requested=["2022q2", "2022q3"],
             filings_retrieved_total=1234,
-            eightk_item202_counts={"1": 1, "2": 0},
+            historical_item202_counts={"1": 1, "2": 0},
             eps_records=_eps_records(1),
             fallback_diag={"n_eps_like_facts": 4, "n_standard": 3, "n_custom": 1, "custom_fallback_rate": 0.25},
             attempt_outcomes=[
@@ -155,12 +155,75 @@ class TestReportRendering:
             "resolution failures: 1",
             "2022q2, 2022q3",
             "filings retrieved",
-            "8-K Item 2.02 filings found",
+            "Historical Item 2.02 filings retrieved",
             "Custom-tag fallback rate: 25.0%",
             "Events identified",
             "Attrition funnel",
+            "SEC connectivity",
+            "XBRL tag diagnostics",
         ]:
             assert required.lower() in md.lower()
+
+    def test_markdown_says_so_explicitly_when_no_telemetry_or_tag_diagnostics_supplied(self):
+        # None must render as an honest "not captured" statement, not be
+        # silently omitted (which would look identical to "nothing to report")
+        report = build_probe_report(
+            ciks_attempted=["1"],
+            ticker_resolution={"1": "AAA"},
+            quarters_requested=["2022q2"],
+            filings_retrieved_total=10,
+            historical_item202_counts={"1": 1},
+            eps_records=_eps_records(1),
+            fallback_diag={"n_eps_like_facts": 1, "n_standard": 1, "n_custom": 0, "custom_fallback_rate": 0.0},
+            attempt_outcomes=[AttemptOutcome(cik="1", period_end="2022-06-30", reason=None)],
+        )
+        md = report.to_markdown()
+        assert "no request telemetry captured" in md.lower()
+        assert "no tag diagnostics captured" in md.lower()
+
+    def test_markdown_renders_telemetry_and_tag_diagnostics_when_supplied(self):
+        telemetry_summary = {
+            "total_requests": 5,
+            "status_code_distribution": {"200": 4, "403": 1},
+            "failed_requests": 1,
+            "any_rate_limit_headers_observed": True,
+            "total_response_bytes": 123456,
+            "total_elapsed_seconds": 2.5,
+        }
+        tag_diag = {
+            "n_eps_like_facts": 10,
+            "top_tags": [
+                {"tag": "EarningsPerShareDiluted", "namespace": "us-gaap", "count": 6, "accepted": True},
+                {"tag": "acme_EarningsPerShareX", "namespace": "acme", "count": 4, "accepted": False},
+            ],
+            "custom_tag_examples": [{"tag": "acme_EarningsPerShareX", "namespace": "acme"}],
+            "tag_name_based_custom_rate": 0.4,
+            "namespace_based_custom_rate": 0.4,
+            "rates_agree_within_5pct": True,
+        }
+        report = build_probe_report(
+            ciks_attempted=["1"],
+            ticker_resolution={"1": "AAA"},
+            quarters_requested=["2022q2"],
+            filings_retrieved_total=10,
+            historical_item202_counts={"1": 1},
+            eps_records=_eps_records(1),
+            fallback_diag={"n_eps_like_facts": 1, "n_standard": 1, "n_custom": 0, "custom_fallback_rate": 0.0},
+            attempt_outcomes=[AttemptOutcome(cik="1", period_end="2022-06-30", reason=None)],
+            telemetry_summary=telemetry_summary,
+            telemetry_records=[{"endpoint": "sec_submissions", "http_status": 200}],
+            tag_diagnostics=tag_diag,
+        )
+        md = report.to_markdown()
+        assert "total sec requests made: 5" in md.lower()
+        assert "403" in md
+        assert "failed requests (error or 4xx/5xx): 1" in md.lower()
+        assert "earningspersharediluted" in md.lower()
+        assert "acme_earningspersharex" in md.lower()
+        d = report.to_dict()
+        assert d["sec_request_telemetry"] == telemetry_summary
+        assert d["sec_request_records"] == [{"endpoint": "sec_submissions", "http_status": 200}]
+        assert d["tag_diagnostics"] == tag_diag
 
     def test_to_dict_round_trips_through_json_safely(self):
         import json
@@ -170,7 +233,7 @@ class TestReportRendering:
             ticker_resolution={"1": "AAA"},
             quarters_requested=["2022q2"],
             filings_retrieved_total=10,
-            eightk_item202_counts={"1": 1},
+            historical_item202_counts={"1": 1},
             eps_records=_eps_records(1),
             fallback_diag={"n_eps_like_facts": 1, "n_standard": 1, "n_custom": 0, "custom_fallback_rate": 0.0},
             attempt_outcomes=[AttemptOutcome(cik="1", period_end="2022-06-30", reason=None)],
