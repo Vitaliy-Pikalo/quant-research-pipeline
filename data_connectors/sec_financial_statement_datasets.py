@@ -32,7 +32,9 @@ import zipfile
 import pandas as pd
 import requests
 
-SEC_USER_AGENT = "quant-research-pipeline research@example.com"  # replace with a real contact before running live
+from data_connectors.telemetry import RequestTelemetryCollector, instrumented_get
+
+SEC_USER_AGENT = "Vitaliy Pikalo pikalo.vitaliy@gmail.com"  # real identifying contact per SEC's fair-access policy
 FSDS_URL_TMPL = "https://www.sec.gov/files/dera/data/financial-statement-data-sets/{quarter}.zip"
 
 # Priority order, highest first. Only EPS from continuing operations is
@@ -46,6 +48,15 @@ EPS_TAG_PRIORITY: list[str] = [
 
 _SUB_COLUMNS_NEEDED = ["adsh", "cik", "form", "period", "fy", "fp", "filed"]
 _NUM_COLUMNS_NEEDED = ["adsh", "tag", "version", "ddate", "qtrs", "uom", "value"]
+
+# The `version` column in num.txt encodes a fact's taxonomy namespace, e.g.
+# "us-gaap/2022" for a standard element or a filer-specific prefix (often
+# derived from the filer's own short code) for a custom extension element.
+# These are XBRL US's standard, shared taxonomies -- anything outside this
+# set is a company-specific extension, which is a DIFFERENT and generally
+# more reliable signal than matching on the tag NAME (see
+# tag_distribution_diagnostics()'s namespace_based_custom_rate).
+_STANDARD_TAXONOMY_PREFIXES = frozenset({"us-gaap", "dei", "srt", "country", "currency", "invest", "stpr", "naics", "sic", "exch"})
 
 
 def extract_eps_records(sub_df: pd.DataFrame, num_df: pd.DataFrame, tag_priority: list[str] | None = None) -> pd.DataFrame:
@@ -109,7 +120,89 @@ def custom_tag_fallback_rate(num_df: pd.DataFrame, standard_tags: list[str] | No
     }
 
 
-def fetch_quarter(quarter: str, session: requests.Session | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:  # pragma: no cover -- network
+def tag_distribution_diagnostics(num_df: pd.DataFrame, tag_priority: list[str] | None = None, top_n: int = 20) -> dict:
+    """
+    Instrumentation-only diagnostic -- does NOT change which records
+    extract_eps_records() accepts or how custom_tag_fallback_rate()
+    computes its rate. Added per this milestone's explicit scope: the
+    first real probe reported a 52.3% custom-tag fallback rate, which is
+    surprising enough that it needs to be inspected before anyone decides
+    whether it reflects a real data-quality limitation or an artifact of
+    the rate's own measurement heuristic. This function makes the
+    underlying tag composition visible so that question can actually be
+    answered, without touching the extraction rule itself.
+
+    Returns a dict with:
+      - n_eps_like_facts: same population custom_tag_fallback_rate() uses
+        (tag name contains "EarningsPerShare", case-insensitive).
+      - top_tags: the top_n most frequent EPS-like tags, each with its
+        namespace (parsed from the `version` column's prefix before "/")
+        and whether tag_priority currently accepts it.
+      - custom_tag_examples: up to 10 distinct (tag, namespace) pairs among
+        facts NOT in tag_priority, for manual inspection -- this is what
+        the previous probe report couldn't show at all.
+      - tag_name_based_custom_rate: identical definition to
+        custom_tag_fallback_rate()'s rate (kept alongside for direct
+        comparison, not as a replacement).
+      - namespace_based_custom_rate: an ALTERNATIVE custom-tag signal using
+        the `version` column's taxonomy namespace instead of the tag name.
+        Standard us-gaap tags NOT in EPS_TAG_PRIORITY (e.g.
+        "EarningsPerShareBasic", reported alone by filers with a simple
+        capital structure) are still namespace-standard even though the
+        tag-name-based rate currently counts them as "custom" -- if the two
+        rates disagree substantially, that disagreement is itself the
+        evidence needed to decide whether the tag-name heuristic is
+        overstating the real custom-tag rate.
+      - rates_agree_within_5pct: convenience flag on the above comparison.
+    """
+    tag_priority = tag_priority or EPS_TAG_PRIORITY
+    eps_like = num_df[num_df["tag"].str.contains("EarningsPerShare", case=False, na=False)].copy()
+
+    if eps_like.empty:
+        return {
+            "n_eps_like_facts": 0,
+            "top_tags": [],
+            "custom_tag_examples": [],
+            "tag_name_based_custom_rate": None,
+            "namespace_based_custom_rate": None,
+            "rates_agree_within_5pct": None,
+        }
+
+    eps_like["namespace"] = eps_like["version"].astype(str).str.split("/").str[0].str.lower()
+    eps_like["is_standard_taxonomy_namespace"] = eps_like["namespace"].isin(_STANDARD_TAXONOMY_PREFIXES)
+    eps_like["accepted_by_tag_priority"] = eps_like["tag"].isin(tag_priority)
+
+    tag_counts = (
+        eps_like.groupby(["tag", "namespace"], dropna=False)
+        .agg(count=("tag", "size"), accepted=("accepted_by_tag_priority", "first"))
+        .reset_index()
+        .sort_values("count", ascending=False)
+        .head(top_n)
+    )
+    top_tags = [
+        {"tag": row["tag"], "namespace": row["namespace"], "count": int(row["count"]), "accepted": bool(row["accepted"])}
+        for _, row in tag_counts.iterrows()
+    ]
+
+    non_priority = eps_like[~eps_like["accepted_by_tag_priority"]]
+    custom_tag_examples = non_priority[["tag", "namespace"]].drop_duplicates().head(10).to_dict(orient="records")
+
+    tag_name_based_custom_rate = float((~eps_like["accepted_by_tag_priority"]).mean())
+    namespace_based_custom_rate = float((~eps_like["is_standard_taxonomy_namespace"]).mean())
+
+    return {
+        "n_eps_like_facts": int(len(eps_like)),
+        "top_tags": top_tags,
+        "custom_tag_examples": custom_tag_examples,
+        "tag_name_based_custom_rate": tag_name_based_custom_rate,
+        "namespace_based_custom_rate": namespace_based_custom_rate,
+        "rates_agree_within_5pct": abs(tag_name_based_custom_rate - namespace_based_custom_rate) <= 0.05,
+    }
+
+
+def fetch_quarter(
+    quarter: str, session: requests.Session | None = None, telemetry: RequestTelemetryCollector | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame]:  # pragma: no cover -- network
     """
     quarter : e.g. "2022q3", matching SEC's own file-naming convention.
     Downloads and unzips one quarter's Financial Statement Data Set,
@@ -117,8 +210,14 @@ def fetch_quarter(quarter: str, session: requests.Session | None = None) -> tupl
     doesn't have -- see module docstring.
     """
     session = session or requests.Session()
-    resp = session.get(FSDS_URL_TMPL.format(quarter=quarter), headers={"User-Agent": SEC_USER_AGENT}, timeout=120)
-    resp.raise_for_status()
+    resp = instrumented_get(
+        session,
+        FSDS_URL_TMPL.format(quarter=quarter),
+        headers={"User-Agent": SEC_USER_AGENT},
+        timeout=120,
+        endpoint_label="sec_fsds_quarter",
+        telemetry=telemetry,
+    )
     with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
         with zf.open("sub.txt") as f:
             sub_df = pd.read_csv(f, sep="\t", low_memory=False)
