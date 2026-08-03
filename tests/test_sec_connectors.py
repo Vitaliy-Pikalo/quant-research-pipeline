@@ -115,6 +115,10 @@ class TestExtractEpsRecords:
 
 
 class TestExtractSharesOutstanding:
+    # Uses "CommonStockSharesOutstanding" (the real, well-populated tag --
+    # see SHARES_OUTSTANDING_TAG_PRIORITY's docstring for the correction
+    # history), not the sparse dei cover-page tag originally guessed.
+
     def _sub_df(self) -> pd.DataFrame:
         return pd.DataFrame(
             [
@@ -126,13 +130,13 @@ class TestExtractSharesOutstanding:
     def test_single_class_filer_returns_the_one_value(self):
         num_df = pd.DataFrame(
             [
-                dict(adsh="0001-22-000001", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=0, uom="shares", value=10_000_000, coreg=None),
+                dict(adsh="0001-22-000001", tag="CommonStockSharesOutstanding", version="us-gaap/2022", ddate=20221027, qtrs=0, uom="shares", value=10_000_000, coreg=None),
             ]
         )
         out = extract_shares_outstanding(self._sub_df(), num_df)
         assert len(out) == 1
         assert out.iloc[0]["shares_outstanding"] == 10_000_000
-        assert out.iloc[0]["tag_used"] == "EntityCommonStockSharesOutstanding"
+        assert out.iloc[0]["tag_used"] == "CommonStockSharesOutstanding"
 
     def test_dual_class_filer_sums_both_class_rows(self):
         # Same cik/ddate/adsh, two rows distinguished by coreg (one per
@@ -141,13 +145,28 @@ class TestExtractSharesOutstanding:
         # down to one the way extract_eps_records() dedupes competing tags.
         num_df = pd.DataFrame(
             [
-                dict(adsh="0001-22-000001", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=0, uom="shares", value=7_000_000, coreg="ClassA"),
-                dict(adsh="0001-22-000001", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=0, uom="shares", value=3_000_000, coreg="ClassB"),
+                dict(adsh="0001-22-000001", tag="CommonStockSharesOutstanding", version="us-gaap/2022", ddate=20221027, qtrs=0, uom="shares", value=7_000_000, coreg="ClassA"),
+                dict(adsh="0001-22-000001", tag="CommonStockSharesOutstanding", version="us-gaap/2022", ddate=20221027, qtrs=0, uom="shares", value=3_000_000, coreg="ClassB"),
             ]
         )
         out = extract_shares_outstanding(self._sub_df(), num_df)
         assert len(out) == 1
         assert out.iloc[0]["shares_outstanding"] == 10_000_000
+
+    def test_falls_back_to_entity_common_stock_tag_when_primary_absent(self):
+        # EntityCommonStockSharesOutstanding is real but rare in this
+        # dataset (see SHARES_OUTSTANDING_TAG_PRIORITY docstring) -- kept
+        # as a fallback tier, same "prefer the better tag" pattern as
+        # extract_eps_records(), not summed together with the primary tag.
+        num_df = pd.DataFrame(
+            [
+                dict(adsh="0001-22-000001", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=0, uom="shares", value=9_500_000, coreg=None),
+            ]
+        )
+        out = extract_shares_outstanding(self._sub_df(), num_df)
+        assert len(out) == 1
+        assert out.iloc[0]["tag_used"] == "EntityCommonStockSharesOutstanding"
+        assert out.iloc[0]["shares_outstanding"] == 9_500_000
 
     def test_excludes_duration_facts(self):
         # qtrs != 0 would be a duration fact (weighted-average shares over
@@ -155,7 +174,7 @@ class TestExtractSharesOutstanding:
         # wants -- must not be silently pooled in.
         num_df = pd.DataFrame(
             [
-                dict(adsh="0001-22-000001", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=1, uom="shares", value=10_000_000, coreg=None),
+                dict(adsh="0001-22-000001", tag="CommonStockSharesOutstanding", version="us-gaap/2022", ddate=20221027, qtrs=1, uom="shares", value=10_000_000, coreg=None),
             ]
         )
         out = extract_shares_outstanding(self._sub_df(), num_df)
@@ -166,8 +185,8 @@ class TestExtractSharesOutstanding:
         # summed together, even if they happen to share a ddate.
         num_df = pd.DataFrame(
             [
-                dict(adsh="0001-22-000001", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=0, uom="shares", value=10_000_000, coreg=None),
-                dict(adsh="0002-22-000002", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=0, uom="shares", value=5_000_000, coreg=None),
+                dict(adsh="0001-22-000001", tag="CommonStockSharesOutstanding", version="us-gaap/2022", ddate=20221027, qtrs=0, uom="shares", value=10_000_000, coreg=None),
+                dict(adsh="0002-22-000002", tag="CommonStockSharesOutstanding", version="us-gaap/2022", ddate=20221027, qtrs=0, uom="shares", value=5_000_000, coreg=None),
             ]
         )
         out = extract_shares_outstanding(self._sub_df(), num_df)
@@ -175,7 +194,7 @@ class TestExtractSharesOutstanding:
         assert set(out["shares_outstanding"]) == {10_000_000, 5_000_000}
 
     def test_missing_columns_raises(self):
-        bad_num = pd.DataFrame([dict(adsh="x", tag="EntityCommonStockSharesOutstanding")])
+        bad_num = pd.DataFrame([dict(adsh="x", tag="CommonStockSharesOutstanding")])
         with pytest.raises(ValueError, match="missing columns"):
             extract_shares_outstanding(self._sub_df(), bad_num)
 
@@ -189,7 +208,7 @@ class TestExtractSharesOutstanding:
 
     def test_period_end_parsed_as_datetime(self):
         num_df = pd.DataFrame(
-            [dict(adsh="0001-22-000001", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=0, uom="shares", value=10_000_000, coreg=None)]
+            [dict(adsh="0001-22-000001", tag="CommonStockSharesOutstanding", version="us-gaap/2022", ddate=20221027, qtrs=0, uom="shares", value=10_000_000, coreg=None)]
         )
         out = extract_shares_outstanding(self._sub_df(), num_df)
         assert out.iloc[0]["period_end"] == pd.Timestamp("2022-10-27")

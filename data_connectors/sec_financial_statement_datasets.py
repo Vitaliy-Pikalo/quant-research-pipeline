@@ -49,16 +49,27 @@ EPS_TAG_PRIORITY: list[str] = [
 _SUB_COLUMNS_NEEDED = ["adsh", "cik", "form", "period", "fy", "fp", "filed"]
 _NUM_COLUMNS_NEEDED = ["adsh", "tag", "version", "ddate", "qtrs", "uom", "value"]
 
-# Cover-page fact required on every 10-Q/10-K, tagged as of the filing's
-# as-of date (an "instant" fact -- qtrs == 0, not a duration). Chosen as the
-# first (and currently only) priority tag because it is a REQUIRED
-# dei-taxonomy cover-page element, not an inline-XBRL detail tag left to
-# filer discretion the way EPS tags are -- coverage should be close to
-# universal. A us-gaap:CommonStockSharesOutstanding fallback is a documented
-# possible next step if real probe output shows meaningful gaps, not added
-# speculatively ahead of that evidence.
+# CORRECTED after real-data diagnostic (see backtests/_diag_shares_tags.py
+# output, 2026-08-03, real 2022q3 pull): the original assumption below this
+# comment was WRONG and is kept only as a record of what was tried.
+#
+# ORIGINAL (wrong) assumption: "EntityCommonStockSharesOutstanding" (a dei
+# cover-page fact) would have near-universal coverage since it's a required
+# cover-page element. Real data showed only 3 total rows in a full quarter's
+# bulk file -- SEC's Financial Statement Data Sets are built from the
+# financial statements themselves, not the document cover page, so a
+# cover-page-only fact is barely represented here regardless of how
+# "required" it is on the actual filed document.
+#
+# REAL primary tag, confirmed against live data: "CommonStockSharesOutstanding"
+# (us-gaap, a genuine balance-sheet/equity-note disclosure) -- 27,424 rows in
+# the same quarter, confirmed instant-type (qtrs == 0, same filter as
+# below), and confirmed to be the tag multi-class filers repeat once per
+# share class -- exactly the "sum all reported share-class tags" pattern
+# H11_data_availability_review.md section 5 describes.
 SHARES_OUTSTANDING_TAG_PRIORITY: list[str] = [
-    "EntityCommonStockSharesOutstanding",
+    "CommonStockSharesOutstanding",
+    "EntityCommonStockSharesOutstanding",  # rare in this dataset (see above); kept as a low-priority fallback, not the primary source
 ]
 
 # The `version` column in num.txt encodes a fact's taxonomy namespace, e.g.
