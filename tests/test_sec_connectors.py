@@ -6,6 +6,7 @@ from data_connectors.sec_financial_statement_datasets import (
     EPS_TAG_PRIORITY,
     custom_tag_fallback_rate,
     extract_eps_records,
+    extract_shares_outstanding,
 )
 from data_connectors.sec_8k_item202 import parse_submission_filings_for_item_202
 from hypotheses.h11_pead.config import H11Config
@@ -111,6 +112,87 @@ class TestExtractEpsRecords:
         )
         out = extract_eps_records(self._sub_df(), num_df)
         assert out.iloc[0]["period_end"] == pd.Timestamp("2022-09-30")
+
+
+class TestExtractSharesOutstanding:
+    def _sub_df(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                dict(adsh="0001-22-000001", cik=320193, form="10-Q", period=20220930, fy=2022, fp="Q3", filed=20221027),
+                dict(adsh="0002-22-000002", cik=999999, form="10-Q", period=20220930, fy=2022, fp="Q3", filed=20221101),
+            ]
+        )
+
+    def test_single_class_filer_returns_the_one_value(self):
+        num_df = pd.DataFrame(
+            [
+                dict(adsh="0001-22-000001", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=0, uom="shares", value=10_000_000, coreg=None),
+            ]
+        )
+        out = extract_shares_outstanding(self._sub_df(), num_df)
+        assert len(out) == 1
+        assert out.iloc[0]["shares_outstanding"] == 10_000_000
+        assert out.iloc[0]["tag_used"] == "EntityCommonStockSharesOutstanding"
+
+    def test_dual_class_filer_sums_both_class_rows(self):
+        # Same cik/ddate/adsh, two rows distinguished by coreg (one per
+        # share class) -- per H11_data_availability_review.md section 5,
+        # both must be summed into total shares outstanding, not deduped
+        # down to one the way extract_eps_records() dedupes competing tags.
+        num_df = pd.DataFrame(
+            [
+                dict(adsh="0001-22-000001", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=0, uom="shares", value=7_000_000, coreg="ClassA"),
+                dict(adsh="0001-22-000001", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=0, uom="shares", value=3_000_000, coreg="ClassB"),
+            ]
+        )
+        out = extract_shares_outstanding(self._sub_df(), num_df)
+        assert len(out) == 1
+        assert out.iloc[0]["shares_outstanding"] == 10_000_000
+
+    def test_excludes_duration_facts(self):
+        # qtrs != 0 would be a duration fact (weighted-average shares over
+        # a period), not the instant as-of-filing-date figure this function
+        # wants -- must not be silently pooled in.
+        num_df = pd.DataFrame(
+            [
+                dict(adsh="0001-22-000001", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=1, uom="shares", value=10_000_000, coreg=None),
+            ]
+        )
+        out = extract_shares_outstanding(self._sub_df(), num_df)
+        assert len(out) == 0
+
+    def test_does_not_sum_across_separate_filings(self):
+        # Two different adsh values for two different CIKs must never be
+        # summed together, even if they happen to share a ddate.
+        num_df = pd.DataFrame(
+            [
+                dict(adsh="0001-22-000001", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=0, uom="shares", value=10_000_000, coreg=None),
+                dict(adsh="0002-22-000002", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=0, uom="shares", value=5_000_000, coreg=None),
+            ]
+        )
+        out = extract_shares_outstanding(self._sub_df(), num_df)
+        assert len(out) == 2
+        assert set(out["shares_outstanding"]) == {10_000_000, 5_000_000}
+
+    def test_missing_columns_raises(self):
+        bad_num = pd.DataFrame([dict(adsh="x", tag="EntityCommonStockSharesOutstanding")])
+        with pytest.raises(ValueError, match="missing columns"):
+            extract_shares_outstanding(self._sub_df(), bad_num)
+
+    def test_empty_input_returns_empty_frame_with_correct_columns(self):
+        num_df = pd.DataFrame(
+            [dict(adsh="0001-22-000001", tag="SomeUnrelatedTag", version="us-gaap/2022", ddate=20221027, qtrs=0, uom="shares", value=1.0)]
+        )
+        out = extract_shares_outstanding(self._sub_df(), num_df)
+        assert len(out) == 0
+        assert list(out.columns) == ["cik", "period_end", "shares_outstanding", "tag_used", "form", "filed", "adsh"]
+
+    def test_period_end_parsed_as_datetime(self):
+        num_df = pd.DataFrame(
+            [dict(adsh="0001-22-000001", tag="EntityCommonStockSharesOutstanding", version="dei/2022", ddate=20221027, qtrs=0, uom="shares", value=10_000_000, coreg=None)]
+        )
+        out = extract_shares_outstanding(self._sub_df(), num_df)
+        assert out.iloc[0]["period_end"] == pd.Timestamp("2022-10-27")
 
 
 class TestCustomTagFallbackRate:

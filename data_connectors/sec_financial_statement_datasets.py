@@ -49,6 +49,18 @@ EPS_TAG_PRIORITY: list[str] = [
 _SUB_COLUMNS_NEEDED = ["adsh", "cik", "form", "period", "fy", "fp", "filed"]
 _NUM_COLUMNS_NEEDED = ["adsh", "tag", "version", "ddate", "qtrs", "uom", "value"]
 
+# Cover-page fact required on every 10-Q/10-K, tagged as of the filing's
+# as-of date (an "instant" fact -- qtrs == 0, not a duration). Chosen as the
+# first (and currently only) priority tag because it is a REQUIRED
+# dei-taxonomy cover-page element, not an inline-XBRL detail tag left to
+# filer discretion the way EPS tags are -- coverage should be close to
+# universal. A us-gaap:CommonStockSharesOutstanding fallback is a documented
+# possible next step if real probe output shows meaningful gaps, not added
+# speculatively ahead of that evidence.
+SHARES_OUTSTANDING_TAG_PRIORITY: list[str] = [
+    "EntityCommonStockSharesOutstanding",
+]
+
 # The `version` column in num.txt encodes a fact's taxonomy namespace, e.g.
 # "us-gaap/2022" for a standard element or a filer-specific prefix (often
 # derived from the filer's own short code) for a custom extension element.
@@ -96,6 +108,77 @@ def extract_eps_records(sub_df: pd.DataFrame, num_df: pd.DataFrame, tag_priority
     out["period_end"] = pd.to_datetime(out["period_end"], format="%Y%m%d", errors="coerce")
     out["filed"] = pd.to_datetime(out["filed"], format="%Y%m%d", errors="coerce")
     return out[["cik", "period_end", "eps_value", "tag_used", "form", "filed", "adsh"]].reset_index(drop=True)
+
+
+def extract_shares_outstanding(sub_df: pd.DataFrame, num_df: pd.DataFrame, tag_priority: list[str] | None = None) -> pd.DataFrame:
+    """
+    Extracts as-filed shares-outstanding facts for market-cap construction
+    (H11_IMPLEMENTATION_SPEC.md stage 2). NOT part of EPS extraction --
+    entirely separate tag family, entirely separate use (market cap /
+    universe qualification, not SUE).
+
+    Per H11_data_availability_review.md section 5's "Dual-class share
+    aggregation for market cap" mitigation ("sum all reported share-class
+    tags for a CIK at each date"): a filer with two share classes reports
+    EntityCommonStockSharesOutstanding more than once for the SAME
+    (cik, ddate, adsh) -- once per class, distinguished in num.txt by the
+    `coreg` column -- and every such row must be summed, not deduplicated
+    down to one. This is the opposite of extract_eps_records()'s
+    keep-highest-priority-one behavior, deliberately: EPS tags compete
+    (same concept, different tag names, pick the best one); share-class
+    rows do not compete, they add up to total shares outstanding.
+
+    Only sums within a single (cik, ddate, adsh) -- if the same period_end
+    is reported across more than one filing (e.g. a 10-Q and a later
+    10-Q/A), those are kept as separate rows (most recently FILED one
+    should be preferred by the caller), never summed across filings, which
+    would double-count.
+
+    Returns columns: cik, period_end, shares_outstanding, tag_used, form,
+    filed, adsh.
+    """
+    tag_priority = tag_priority or SHARES_OUTSTANDING_TAG_PRIORITY
+
+    missing_sub = set(_SUB_COLUMNS_NEEDED) - set(sub_df.columns)
+    missing_num = set(_NUM_COLUMNS_NEEDED) - set(num_df.columns)
+    if missing_sub or missing_num:
+        raise ValueError(f"missing columns -- sub.txt: {missing_sub or 'ok'}, num.txt: {missing_num or 'ok'}")
+
+    candidates = num_df[num_df["tag"].isin(tag_priority) & (num_df["qtrs"] == 0)]
+    if candidates.empty:
+        return pd.DataFrame(columns=["cik", "period_end", "shares_outstanding", "tag_used", "form", "filed", "adsh"])
+
+    # Defensive dedup on the full fact identity (including coreg, if
+    # present) before summing -- protects against the same exact row
+    # appearing twice in a source file, not against legitimate multi-class
+    # rows, which differ by coreg and must both survive.
+    dedup_subset = [c for c in ["adsh", "tag", "ddate", "coreg", "value"] if c in candidates.columns]
+    candidates = candidates.drop_duplicates(subset=dedup_subset)
+
+    merged = candidates.merge(sub_df[_SUB_COLUMNS_NEEDED], on="adsh", how="inner")
+
+    # priority_rank picks ONE tag per (cik, ddate, adsh) if more than one
+    # priority tag is present for the same filing/date; rows within that
+    # chosen tag are then summed across share classes.
+    priority_rank = {tag: i for i, tag in enumerate(tag_priority)}
+    merged = merged.assign(_tag_rank=merged["tag"].map(priority_rank))
+    best_tag_per_group = (
+        merged.sort_values(["cik", "ddate", "adsh", "_tag_rank"])
+        .groupby(["cik", "ddate", "adsh"], as_index=False)
+        .first()[["cik", "ddate", "adsh", "tag"]]
+        .rename(columns={"tag": "_chosen_tag"})
+    )
+    merged = merged.merge(best_tag_per_group, on=["cik", "ddate", "adsh"])
+    merged = merged[merged["tag"] == merged["_chosen_tag"]]
+
+    summed = merged.groupby(["cik", "ddate", "adsh", "form", "filed"], as_index=False).agg(
+        shares_outstanding=("value", "sum"), tag_used=("tag", "first")
+    )
+
+    summed["cik"] = summed["cik"].astype(str).str.zfill(10)
+    summed["period_end"] = pd.to_datetime(summed["ddate"], format="%Y%m%d", errors="coerce")
+    summed["filed"] = pd.to_datetime(summed["filed"], format="%Y%m%d", errors="coerce")
+    return summed[["cik", "period_end", "shares_outstanding", "tag_used", "form", "filed", "adsh"]].reset_index(drop=True)
 
 
 def custom_tag_fallback_rate(num_df: pd.DataFrame, standard_tags: list[str] | None = None) -> dict:
