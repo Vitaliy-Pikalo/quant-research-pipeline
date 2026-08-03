@@ -1,0 +1,39 @@
+{
+  "ciks_analyzed": 3,
+  "newly_sue_computable_under_expanded_tags": 0,
+  "per_cik_detail": [
+    {
+      "cik": "0000798081",
+      "baseline_n_quarters": 13,
+      "expanded_n_quarters": 13,
+      "baseline_sue_computable": true,
+      "expanded_sue_computable": true,
+      "newly_computable_under_expanded_tags": false,
+      "baseline_sue_value": -0.5729171210266728,
+      "expanded_sue_value": -0.5729171210266728,
+      "baseline_disqualification_reason": null
+    },
+    {
+      "cik": "0000723603",
+      "baseline_n_quarters": 15,
+      "expanded_n_quarters": 15,
+      "baseline_sue_computable": true,
+      "expanded_sue_computable": true,
+      "newly_computable_under_expanded_tags": false,
+      "baseline_sue_value": -0.5064827616762446,
+      "expanded_sue_value": -0.5064827616762446,
+      "baseline_disqualification_reason": null
+    },
+    {
+      "cik": "0000080420",
+      "baseline_n_quarters": 15,
+      "expanded_n_quarters": 15,
+      "baseline_sue_computable": true,
+      "expanded_sue_computable": true,
+      "newly_computable_under_expanded_tags": false,
+      "baseline_sue_value": 1.9412348851626864,
+      "expanded_sue_value": 1.9412348851626864,
+      "baseline_disqualification_reason": null
+    }
+  ]
+}

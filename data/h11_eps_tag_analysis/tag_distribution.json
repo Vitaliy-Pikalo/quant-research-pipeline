@@ -1,0 +1,350 @@
+{
+  "n_eps_like_facts": 482711,
+  "top_tags": [
+    {
+      "tag": "EarningsPerShareBasic",
+      "namespace": "us-gaap",
+      "count": 191941,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareDiluted",
+      "namespace": "us-gaap",
+      "count": 183807,
+      "accepted": true
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDiluted",
+      "namespace": "us-gaap",
+      "count": 101737,
+      "accepted": true
+    },
+    {
+      "tag": "AntidilutiveSecuritiesExcludedFromComputationOfEarningsPerShareAmount",
+      "namespace": "us-gaap",
+      "count": 756,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicUndistributed",
+      "namespace": "us-gaap",
+      "count": 149,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareDilutedUndistributed",
+      "namespace": "us-gaap",
+      "count": 114,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicDistributed",
+      "namespace": "us-gaap",
+      "count": 86,
+      "accepted": false
+    },
+    {
+      "tag": "BasicEarningsPerShareProForma",
+      "namespace": "us-gaap",
+      "count": 75,
+      "accepted": false
+    },
+    {
+      "tag": "DilutedEarningsPerShareProForma",
+      "namespace": "us-gaap",
+      "count": 74,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDilutedSubjectToPossibleRedemption",
+      "namespace": "0001493152-21-014216",
+      "count": 57,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDilutedSubjectToPossibleRedemption",
+      "namespace": "0001493152-21-013848",
+      "count": 57,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDilutedSubjectToPossibleRedemption",
+      "namespace": "0001493152-21-018964",
+      "count": 57,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDilutedSubjectToPossibleRedemption",
+      "namespace": "0001493152-21-013767",
+      "count": 57,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDilutedSubjectToPossibleRedemption",
+      "namespace": "0001493152-21-026244",
+      "count": 57,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDilutedSubjectToPossibleRedemption",
+      "namespace": "0001493152-21-023305",
+      "count": 57,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDilutedSubjectToPossibleRedemption",
+      "namespace": "0001493152-21-026770",
+      "count": 57,
+      "accepted": false
+    },
+    {
+      "tag": "DilutiveSecuritiesEffectOnBasicEarningsPerShareOther",
+      "namespace": "us-gaap",
+      "count": 25,
+      "accepted": false
+    },
+    {
+      "tag": "TemporaryEquityEarningsPerShareBasicAndDiluted",
+      "namespace": "0001140361-21-023775",
+      "count": 22,
+      "accepted": false
+    },
+    {
+      "tag": "TemporaryEquityEarningsPerShareBasicAndDiluted",
+      "namespace": "0001140361-21-017052",
+      "count": 22,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDilutedNonRedeemableCommonStock",
+      "namespace": "0001213900-21-032086",
+      "count": 20,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerSharesBasicAndDiluted",
+      "namespace": "0001213900-22-033606",
+      "count": 18,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerSharesBasicAndDiluted",
+      "namespace": "0001213900-22-039673",
+      "count": 18,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerSharesBasicAndDiluted",
+      "namespace": "0001213900-22-043439",
+      "count": 18,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDiluted1",
+      "namespace": "0001017386-22-000147",
+      "count": 15,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDiluted",
+      "namespace": "0001193125-22-226323",
+      "count": 14,
+      "accepted": true
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDiluted",
+      "namespace": "0001193125-22-251373",
+      "count": 14,
+      "accepted": true
+    },
+    {
+      "tag": "EarningsPerShareDilutedDistributed",
+      "namespace": "us-gaap",
+      "count": 14,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerSharesBasicAndDiluted",
+      "namespace": "0001213900-22-029874",
+      "count": 12,
+      "accepted": false
+    },
+    {
+      "tag": "BasicEarningsPerShareAdjustmentProForma",
+      "namespace": "us-gaap",
+      "count": 12,
+      "accepted": false
+    },
+    {
+      "tag": "BusinessAcquisitionProFormaEarningsPerShareBasic",
+      "namespace": "us-gaap",
+      "count": 12,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerSharesBasicAndDiluted",
+      "namespace": "0001213900-22-033679",
+      "count": 12,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerSharesBasicAndDiluted",
+      "namespace": "0001213900-22-039077",
+      "count": 12,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerSharesBasicAndDiluted",
+      "namespace": "0001213900-22-026101",
+      "count": 12,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDiluted1",
+      "namespace": "0001575705-22-000444",
+      "count": 12,
+      "accepted": false
+    },
+    {
+      "tag": "TemporaryEquityEarningsPerShareBasicAndDiluted",
+      "namespace": "0001104659-21-145306",
+      "count": 12,
+      "accepted": false
+    },
+    {
+      "tag": "TemporaryEquityEarningsPerShareBasicAndDiluted",
+      "namespace": "0001104659-21-107865",
+      "count": 12,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerSharesBasicAndDiluted",
+      "namespace": "0001213900-22-039196",
+      "count": 12,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDiluted1",
+      "namespace": "0001575705-22-000278",
+      "count": 11,
+      "accepted": false
+    },
+    {
+      "tag": "ProformaEarningsPerShareBasicAndDiluted",
+      "namespace": "0001564590-20-008206",
+      "count": 11,
+      "accepted": false
+    },
+    {
+      "tag": "TemporaryEquityEarningsPerShareBasic",
+      "namespace": "0001843212-21-000009",
+      "count": 11,
+      "accepted": false
+    },
+    {
+      "tag": "TemporaryEquityEarningsPerShareDiluted",
+      "namespace": "0001843212-21-000009",
+      "count": 11,
+      "accepted": false
+    },
+    {
+      "tag": "TemporaryEquityEarningsPerShareBasicAndDiluted",
+      "namespace": "0001104659-21-069375",
+      "count": 11,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDilutedNonRedeemableCommonStock",
+      "namespace": "0001213900-21-063108",
+      "count": 11,
+      "accepted": false
+    },
+    {
+      "tag": "TemporaryEquityEarningsPerShareBasicAndDiluted",
+      "namespace": "0001104659-21-080354",
+      "count": 11,
+      "accepted": false
+    },
+    {
+      "tag": "TemporaryEquityEarningsPerShareBasicAndDiluted",
+      "namespace": "0001104659-21-067004",
+      "count": 10,
+      "accepted": false
+    },
+    {
+      "tag": "TemporaryEquityEarningsPerShareBasicAndDiluted",
+      "namespace": "0001104659-21-067006",
+      "count": 10,
+      "accepted": false
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDiluted1",
+      "namespace": "0001096906-22-001891",
+      "count": 10,
+      "accepted": false
+    },
+    {
+      "tag": "TemporaryEquityEarningsPerShareBasicAndDiluted",
+      "namespace": "0001140361-21-037459",
+      "count": 10,
+      "accepted": false
+    },
+    {
+      "tag": "TemporaryEquityEarningsPerShareBasicAndDiluted",
+      "namespace": "0001104659-21-120804",
+      "count": 9,
+      "accepted": false
+    },
+    {
+      "tag": "BasicAndDilutedEarningsPerShare",
+      "namespace": "0001843716-22-000013",
+      "count": 8,
+      "accepted": false
+    }
+  ],
+  "custom_tag_examples": [
+    {
+      "tag": "EarningsPerShareBasic",
+      "namespace": "us-gaap"
+    },
+    {
+      "tag": "AntidilutiveSecuritiesExcludedFromComputationOfEarningsPerShareAmount",
+      "namespace": "us-gaap"
+    },
+    {
+      "tag": "ProformaEarningsPerShareBasicAndDiluted",
+      "namespace": "0001564590-20-008206"
+    },
+    {
+      "tag": "DilutedEarningsPerShareProForma",
+      "namespace": "us-gaap"
+    },
+    {
+      "tag": "EarningsPerShareDilutedUndistributed",
+      "namespace": "us-gaap"
+    },
+    {
+      "tag": "WeightedAverageNumberOfSharesOutstandingUsedToComputeEarningsPerShareBasicAndDiluted",
+      "namespace": "0001595974-20-000026"
+    },
+    {
+      "tag": "EarningsPerShareBasicincludingPortionattributabletononcontrolinginterest",
+      "namespace": "0001065696-20-000008"
+    },
+    {
+      "tag": "EarningsPerShareBasicAndDilutedRedeemableCommonStock",
+      "namespace": "0001213900-20-007390"
+    },
+    {
+      "tag": "EarningsPerShareBasicUndistributed",
+      "namespace": "us-gaap"
+    },
+    {
+      "tag": "WeightedAverageNumberOfEquitySharesUsedInComputingEarningsPerShareBasicAndDiluted",
+      "namespace": "0001193125-20-077290"
+    }
+  ],
+  "tag_name_based_custom_rate": 0.4082629150775516,
+  "namespace_based_custom_rate": 0.008073153501784712,
+  "rates_agree_within_5pct": false
+}
