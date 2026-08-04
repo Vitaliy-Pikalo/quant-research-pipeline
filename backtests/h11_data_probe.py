@@ -81,6 +81,7 @@ from data_connectors.telemetry import RequestTelemetryCollector
 from event_study.diagnostics import StageRunLog, run_gate, stage_timer
 from hypotheses.h11_pead.config import H11Config
 from hypotheses.h11_pead.event_generator import build_event, compute_sue, determine_known_at
+from hypotheses.h11_pead.known_at_resolver import PERIODIC_FORMS
 from hypotheses.h11_pead.probe_report import AttemptOutcome, build_probe_report
 
 OUT_DIR = Path(__file__).resolve().parents[1] / "data" / "h11_probe"
@@ -202,13 +203,32 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
                 )
                 continue
 
-            tenq_rows = sub_all[(sub_all["cik"] == int(cik)) & (sub_all["period"] == int(period_end.strftime("%Y%m%d")))]
+            # ENGINEERING FIX (not a research-definition change -- no
+            # amendment required, per the standing division): this selection
+            # previously had no form filter and no sort, and took .iloc[0].
+            # sub.txt carries 8-K, 20-F, 40-F, S-1, 424B* etc. alongside
+            # periodic reports, so the "10-Q timestamp" could come from a
+            # non-periodic form; and where several filings cover one period
+            # (an original 10-Q plus a later 10-Q/A, or an overlapping 10-K)
+            # the row chosen was whatever pandas ordered first. Now:
+            # periodic originals only, EARLIEST filed wins -- the
+            # as-first-reported principle extract_shares_outstanding()
+            # already applies to its own tiebreak, and the only reading
+            # consistent with "when did this become public". PERIODIC_FORMS
+            # is shared with hypotheses.h11_pead.known_at_resolver so the two
+            # call sites cannot drift apart.
+            tenq_rows = sub_all[
+                (sub_all["cik"] == int(cik))
+                & (sub_all["period"] == int(period_end.strftime("%Y%m%d")))
+                & (sub_all["form"].isin(PERIODIC_FORMS))
+            ]
             if tenq_rows.empty:
                 attempt_outcomes.append(
                     AttemptOutcome(cik=cik_padded, period_end=period_end_str, reason="no_10q_row_for_period_end")
                 )
                 continue
-            tenq_filed = pd.to_datetime(tenq_rows.iloc[0]["filed"], format="%Y%m%d", utc=True).tz_convert("US/Eastern")
+            earliest_filed_row = tenq_rows.sort_values(["filed", "adsh"]).iloc[0]
+            tenq_filed = pd.to_datetime(earliest_filed_row["filed"], format="%Y%m%d", utc=True).tz_convert("US/Eastern")
 
             matching_8k = item202[
                 (item202["acceptance_datetime"] <= tenq_filed)
