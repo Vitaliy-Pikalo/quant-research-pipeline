@@ -77,6 +77,92 @@ def price_as_of(prices: pd.DataFrame, as_of: pd.Timestamp) -> float | None:
     return float(eligible.sort_values("date").iloc[-1]["close"])
 
 
+MARKET_CLOSE_HOUR_ET = 16  # 4:00pm ET, the same cutoff H11_PREREGISTRATION.md section 6 uses
+
+
+def known_at_to_price_panel_bound(known_at: pd.Timestamp, close_hour_et: int = MARKET_CLOSE_HOUR_ET) -> tuple[pd.Timestamp, bool]:
+    """
+    Bridges a tz-aware US/Eastern `known_at` (an EDGAR acceptance timestamp,
+    precise to the second) onto a tz-NAIVE daily price panel whose `date`
+    column carries calendar dates, not instants.
+
+    This conversion is written out explicitly, and tested across a DST
+    boundary, rather than left to pandas' coercion rules -- an implicit
+    tz-aware/tz-naive comparison here is the same class of failure as the
+    already-fixed acceptanceDateTime UTC->Eastern bug (see
+    data_connectors/sec_8k_item202.py's HONESTY FLAG), and pandas raises on
+    some such comparisons while silently succeeding on others.
+
+    Returns (eastern_calendar_date, same_day_close_has_printed):
+      - eastern_calendar_date : tz-naive midnight Timestamp of known_at's
+        Eastern calendar date, directly comparable to the panel's `date`.
+      - same_day_close_has_printed : True iff known_at is at or after the
+        4pm ET close on that date, i.e. that day's closing bar was already
+        observable at known_at.
+
+    A tz-naive `known_at` is accepted and assumed already Eastern (the only
+    timezone any known_at in this project is ever expressed in), rather than
+    being rejected -- fixtures and hand-built test events are frequently
+    naive.
+    """
+    ts = pd.Timestamp(known_at)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("US/Eastern").tz_localize(None)
+    calendar_date = ts.normalize()
+    close_instant = calendar_date + pd.Timedelta(hours=close_hour_et)
+    return calendar_date, bool(ts >= close_instant)
+
+
+def last_printed_close(prices: pd.DataFrame, known_at: pd.Timestamp) -> float | None:
+    """
+    The close of the last daily bar that had ACTUALLY PRINTED at `known_at`
+    -- amendments/H11_AMENDMENT_002.md's operational definition of
+    "price at known_at" for `market_cap`.
+
+    Concretely: the same-day close if `known_at` falls at or after 4pm ET on
+    a trading day, otherwise the previous trading day's close. This is not a
+    conservative approximation of "price at known_at" -- for a daily panel it
+    is the exact set of price information observable at that instant, which
+    is why amendment 002 prefers it to the entry-bar reading for a field
+    used as a SELECTION filter.
+
+    Returns None (never zero, never a future bar) when no bar had printed
+    yet -- a firm not yet listed under the resolved ticker, or a price
+    series that does not reach back far enough. A None here must be recorded
+    downstream as a disqualification with a stated reason.
+
+    NOT to be used for entry pricing. Entry remains
+    H11_PREREGISTRATION.md section 6's rule via
+    hypotheses.h11_pead.event_generator.determine_entry_date, which this
+    function deliberately does not touch.
+    """
+    calendar_date, same_day_close_printed = known_at_to_price_panel_bound(known_at)
+    eligible = prices[prices["date"] <= calendar_date] if same_day_close_printed else prices[prices["date"] < calendar_date]
+    if eligible.empty:
+        return None
+    return float(eligible.sort_values("date").iloc[-1]["close"])
+
+
+def entry_bar_close(prices: pd.DataFrame, known_at: pd.Timestamp) -> float | None:
+    """
+    The close of the bar the strategy would actually transact at, per
+    H11_PREREGISTRATION.md section 6: same-day close if `known_at` is before
+    4pm ET, else the next trading day's close.
+
+    Provided ONLY so the probe can report how often this disagrees with
+    last_printed_close() -- amendment 002 section 6 commits to measuring
+    that disagreement rather than estimating it. It is explicitly NOT the
+    market_cap definition, and reporting the disagreement count is a
+    diagnostic, never grounds for switching to whichever reading admits more
+    firm-quarters.
+    """
+    calendar_date, same_day_close_printed = known_at_to_price_panel_bound(known_at)
+    eligible = prices[prices["date"] >= calendar_date] if not same_day_close_printed else prices[prices["date"] > calendar_date]
+    if eligible.empty:
+        return None
+    return float(eligible.sort_values("date").iloc[0]["close"])
+
+
 def trailing_median_dollar_adv(prices: pd.DataFrame, as_of: pd.Timestamp, window_days: int = 20) -> float | None:
     """
     Median daily dollar volume (close * volume) over the `window_days`
