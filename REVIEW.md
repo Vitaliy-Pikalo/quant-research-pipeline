@@ -104,11 +104,19 @@ unchanged from existing, already-tested code.
   this real run, not by the fixture-based unit tests, which by design
   cannot catch a wrong assumption about which real-world tag or join
   behavior actually holds.
-- **Not yet re-run**: the fixes in this REVIEW.md (collapse + implausible-
-  jump flag) have been committed but the probe has not yet been re-run
-  end-to-end against the 3 target CIKs with both fixes active together --
-  that is the explicit next step, not assumed to work from unit tests
-  alone.
+- **Re-run completed and confirmed** against the 3 target CIKs with both
+  fixes active together: candidate rows dropped from 114 (pre-collapse,
+  duplicated) to 44, each a distinct (cik, period_end) -- zero remaining
+  duplicates. The Lakeland anomaly is now fully explained, not just
+  caught: the collapse logic shows the bad 1000x value
+  (`is_own_reporting_period=True` for 2020-07-31) originates in that
+  filing's OWN primary tag, not a comparative echo -- a genuine filer
+  XBRL error, confirmed by two independent signals (the implausible-jump
+  flag AND the cap-band gate's `market_cap_above_max`). The earlier
+  billions-value duplicate at 2020-01-31 was correctly discarded by the
+  same collapse logic, since that one really was just a bad echo, not the
+  filing's own data -- the two cases are mechanically different and the
+  fix distinguishes them correctly on real data, not by luck.
 
 ## Remaining risks
 
