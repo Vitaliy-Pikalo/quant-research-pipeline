@@ -7,6 +7,7 @@ from data_connectors.sec_financial_statement_datasets import (
     custom_tag_fallback_rate,
     extract_eps_records,
     extract_shares_outstanding,
+    flag_implausible_shares_jumps,
 )
 from data_connectors.sec_8k_item202 import parse_submission_filings_for_item_202
 from hypotheses.h11_pead.config import H11Config
@@ -193,6 +194,57 @@ class TestExtractSharesOutstanding:
         assert len(out) == 2
         assert set(out["shares_outstanding"]) == {10_000_000, 5_000_000}
 
+    def test_collapses_comparative_echoes_across_later_filings_to_one_row(self):
+        # Real bug this guards against: the SAME true 2019-12-31 balance
+        # got reported again as a comparative figure in the 2020q1, q2,
+        # q3, q4 filings too -- a live run against real POWL data produced
+        # 5-6 duplicate rows for one true firm-quarter before this fix.
+        # The filing whose OWN period is 2019-12-31 (adsh 0001, an
+        # end-of-year 10-K) is preferred over the later 10-Q (adsh 0002)
+        # that merely echoes it as a prior-year comparative.
+        sub_df = pd.DataFrame(
+            [
+                dict(adsh="0001-20-000001", cik=1, form="10-K", period=20191231, fy=2019, fp="FY", filed=20200228),
+                dict(adsh="0002-20-000002", cik=1, form="10-Q", period=20200331, fy=2020, fp="Q1", filed=20200515),
+            ]
+        )
+        num_df = pd.DataFrame(
+            [
+                # this filing's own reporting period
+                dict(adsh="0001-20-000001", tag="CommonStockSharesOutstanding", version="us-gaap/2020", ddate=20191231, qtrs=0, uom="shares", value=11_597_000, coreg=None),
+                # the SAME 2019-12-31 balance, echoed as a comparative in the next quarter's 10-Q
+                dict(adsh="0002-20-000002", tag="CommonStockSharesOutstanding", version="us-gaap/2020", ddate=20191231, qtrs=0, uom="shares", value=11_597_000, coreg=None),
+                # this filing's own current-quarter figure
+                dict(adsh="0002-20-000002", tag="CommonStockSharesOutstanding", version="us-gaap/2020", ddate=20200331, qtrs=0, uom="shares", value=11_614_000, coreg=None),
+            ]
+        )
+        out = extract_shares_outstanding(sub_df, num_df)
+        assert len(out) == 2  # one row per real (cik, period_end), not 3
+        row_2019 = out[out["period_end"] == pd.Timestamp("2019-12-31")].iloc[0]
+        assert row_2019["adsh"] == "0001-20-000001"  # the OWN-period filing won, not the echo
+        assert row_2019["is_own_reporting_period"] is True or bool(row_2019["is_own_reporting_period"]) is True
+
+    def test_falls_back_to_earliest_filed_when_no_filing_reports_it_as_own_period(self):
+        # Edge case: this ddate never appears as any filing's own period
+        # in the supplied data (e.g. a gap in the pull) -- falls back to
+        # the earliest-FILED echo rather than raising or picking arbitrarily.
+        sub_df = pd.DataFrame(
+            [
+                dict(adsh="0001-20-000001", cik=1, form="10-Q", period=20200331, fy=2020, fp="Q1", filed=20200515),
+                dict(adsh="0002-20-000002", cik=1, form="10-Q", period=20200630, fy=2020, fp="Q2", filed=20200814),
+            ]
+        )
+        num_df = pd.DataFrame(
+            [
+                dict(adsh="0001-20-000001", tag="CommonStockSharesOutstanding", version="us-gaap/2020", ddate=20191231, qtrs=0, uom="shares", value=11_597_000, coreg=None),
+                dict(adsh="0002-20-000002", tag="CommonStockSharesOutstanding", version="us-gaap/2020", ddate=20191231, qtrs=0, uom="shares", value=11_597_000, coreg=None),
+            ]
+        )
+        out = extract_shares_outstanding(sub_df, num_df)
+        assert len(out) == 1
+        assert out.iloc[0]["adsh"] == "0001-20-000001"  # earliest filed of the two echoes
+        assert not bool(out.iloc[0]["is_own_reporting_period"])
+
     def test_missing_columns_raises(self):
         bad_num = pd.DataFrame([dict(adsh="x", tag="CommonStockSharesOutstanding")])
         with pytest.raises(ValueError, match="missing columns"):
@@ -204,7 +256,9 @@ class TestExtractSharesOutstanding:
         )
         out = extract_shares_outstanding(self._sub_df(), num_df)
         assert len(out) == 0
-        assert list(out.columns) == ["cik", "period_end", "shares_outstanding", "tag_used", "form", "filed", "adsh"]
+        assert list(out.columns) == [
+            "cik", "period_end", "shares_outstanding", "tag_used", "form", "filed", "adsh", "is_own_reporting_period",
+        ]
 
     def test_period_end_parsed_as_datetime(self):
         num_df = pd.DataFrame(
@@ -212,6 +266,65 @@ class TestExtractSharesOutstanding:
         )
         out = extract_shares_outstanding(self._sub_df(), num_df)
         assert out.iloc[0]["period_end"] == pd.Timestamp("2022-10-27")
+
+
+class TestFlagImplausibleSharesJumps:
+    def _shares_df(self, values: list[tuple[str, float]], cik: str = "0000798081") -> pd.DataFrame:
+        return pd.DataFrame(
+            [{"cik": cik, "period_end": pd.Timestamp(d), "shares_outstanding": v} for d, v in values]
+        )
+
+    def test_flags_the_real_lakeland_1000x_tagging_error(self):
+        # Real values from a live run: 2020-01-31 was tagged as
+        # 7,972,423,000 in one filing vs. the correct 7,972,423 everywhere
+        # else for the same firm -- a genuine filer XBRL scaling mistake,
+        # not a real 1000x share issuance. The value(s) immediately
+        # adjacent to the bad one get flagged too -- this is a symmetric,
+        # deterministic "differs sharply from its neighbor" check with no
+        # way to know from 3 points alone WHICH side is wrong, so it
+        # errs toward flagging both for human review rather than risking
+        # missing the real anomaly by trying to guess which side is right.
+        shares = self._shares_df(
+            [
+                ("2019-01-31", 7_972_423.0),
+                ("2020-01-31", 7_972_423_000.0),  # the real bad value
+                ("2020-04-30", 8_481_665.0),
+            ]
+        )
+        out = flag_implausible_shares_jumps(shares)
+        flagged = out[out["period_end"] == pd.Timestamp("2020-01-31")].iloc[0]
+        assert bool(flagged["implausible_jump_flag"]) is True
+
+    def test_does_not_flag_normal_quarter_over_quarter_change(self):
+        shares = self._shares_df(
+            [
+                ("2019-01-31", 11_428_000.0),
+                ("2019-04-30", 11_475_000.0),  # small, ordinary change
+                ("2019-07-31", 11_516_000.0),
+            ]
+        )
+        out = flag_implausible_shares_jumps(shares)
+        assert not out["implausible_jump_flag"].any()
+
+    def test_does_not_compare_across_different_ciks(self):
+        # A big jump is only meaningful relative to the SAME firm's own
+        # history -- must not compare cik A's value against cik B's.
+        shares = pd.concat(
+            [
+                self._shares_df([("2020-01-31", 10_000_000.0)], cik="0000000001"),
+                self._shares_df([("2020-01-31", 10_000.0)], cik="0000000002"),
+            ],
+            ignore_index=True,
+        )
+        out = flag_implausible_shares_jumps(shares)
+        # each cik has only one data point (no neighbor to compare against
+        # within its own series), so neither should be flagged
+        assert not out["implausible_jump_flag"].any()
+
+    def test_single_row_per_cik_is_never_flagged(self):
+        shares = self._shares_df([("2020-01-31", 10_000_000.0)])
+        out = flag_implausible_shares_jumps(shares)
+        assert not out["implausible_jump_flag"].any()
 
 
 class TestCustomTagFallbackRate:

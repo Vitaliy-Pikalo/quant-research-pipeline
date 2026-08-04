@@ -1,80 +1,85 @@
-# REVIEW.md -- Milestone: H11 market-cap/ADV probe (stage 2 bottleneck), in progress
+# REVIEW.md -- Milestone: H11 market-cap/ADV probe (stage 2 bottleneck), validated against real data
 
 Per the standing workflow: this is the handoff document for external
 (GitHub-based) review of this milestone. Supersedes the prior milestone's
 `REVIEW.md` (preserved in git history at `901dae6`).
 
 **Scope note, stated up front:** this milestone is engineering only --
-building the market-cap/ADV data pipeline stage 2 needs and doesn't yet
-exist (per `H11_data_availability_review.md` section 5's finding that
-CIK-keyed joins, not a rebuilt ticker-history database, is the correct
-mitigation for the CIK<->ticker risk). It does not touch
-`H11_PREREGISTRATION.md`, `EPS_TAG_PRIORITY`, or any prior amendment. No
-real universe has been built yet -- this milestone is still mid-validation
-as of this REVIEW.md.
+building the market-cap/ADV data pipeline stage 2 needs and didn't
+previously exist (per `H11_data_availability_review.md` section 5's
+finding that CIK-keyed joins, not a rebuilt ticker-history database, is the
+correct mitigation for the CIK<->ticker risk). It does not touch
+`H11_PREREGISTRATION.md`, `EPS_TAG_PRIORITY`, or any prior amendment.
 
 ## What changed
 
 - **`data_connectors/sec_financial_statement_datasets.py`**:
-  `extract_shares_outstanding()` added -- new function, entirely separate
-  from EPS extraction, for market-cap construction. Sums all reported
-  share-class rows per (cik, ddate, adsh) per
-  `H11_data_availability_review.md` section 5's dual-class mitigation,
-  rather than deduplicating down to one the way EPS tag competition works.
+  `extract_shares_outstanding()` added, plus `flag_implausible_shares_jumps()`.
+  Sums all reported share-class rows per (cik, ddate, adsh) per
+  `H11_data_availability_review.md` section 5's dual-class mitigation, then
+  collapses to exactly one row per real (cik, period_end) -- preferring
+  the filing whose OWN reporting period matches that date over a later
+  filing merely echoing it as a prior-year comparative, falling back to
+  earliest-filed if no filing's own period matches.
 - **`data_connectors/market_data_yfinance.py`** (new file): yfinance
   price/volume fetch (untested here, network) plus two pure, tested
-  functions -- `price_as_of()` (latest close on or before a date, `None`
-  rather than a silently-wrong future price) and
-  `trailing_median_dollar_adv()` (20-trading-day trailing MEDIAN dollar
-  volume, strictly before the reference date, matching
-  `H11_IMPLEMENTATION_SPEC.md` section 3's exact definition -- median, not
-  mean, deliberately robust to one outlier trading day).
-- **`backtests/h11_market_cap_probe.py`** (new file): real small-scale
-  probe, same 3 verified CIKs and 11-quarter window as the prior two
-  probes, joining shares outstanding x price into real market cap and ADV,
-  running the existing `event_study.universe.qualify_row()` against
-  H11's real cap band. Ticker is only introduced for the price join and
-  written to a separate `ticker_resolution_for_review.csv` for manual
-  eyeball review (real SEC company name, exchange, former names), never
-  auto-trusted -- per this project's standing CIK-first, ticker-only-where-
-  unavoidable design for this exact risk category.
-- **Corrected mid-milestone**: `SHARES_OUTSTANDING_TAG_PRIORITY` originally
-  defaulted to `EntityCommonStockSharesOutstanding` (a dei cover-page tag),
-  on the assumption that a required cover-page element would have
-  near-universal coverage. The first real run against live SEC data
-  produced 0 usable candidate rows. Investigated per the standing rule
-  (real attrition gets investigated, not filtered around) rather than
-  tuned blindly: a real-data diagnostic showed that tag has only 3 total
-  rows in a full quarter's bulk file, because SEC's Financial Statement
-  Data Sets are built from the financial statements themselves, not the
-  document cover page. `CommonStockSharesOutstanding` (a real us-gaap
-  balance-sheet/equity-note tag, 27,424 rows in the same quarter, same
-  confirmed instant-type/`qtrs==0` behavior) is now the primary tag; the
-  original tag is kept as a documented low-priority fallback, not removed.
+  functions -- `price_as_of()` and `trailing_median_dollar_adv()`
+  (20-trading-day trailing MEDIAN, not mean, dollar volume, strictly
+  before the reference date, matching `H11_IMPLEMENTATION_SPEC.md`
+  section 3 exactly).
+- **`backtests/h11_market_cap_probe.py`** (new file): real probe, same 3
+  verified CIKs and 11-quarter window as the prior two probes, joining
+  shares outstanding x price into real market cap and ADV, running
+  `event_study.universe.qualify_row()` against H11's real cap band, and
+  surfacing both the implausible-jump flag and a manual ticker-review CSV
+  (SEC company name, exchange, former names) -- never auto-trusting the
+  ticker join, per this project's CIK-first design for this risk category.
+- **Two real bugs found and fixed via live SEC data, not guessed at in
+  advance:**
+  1. `SHARES_OUTSTANDING_TAG_PRIORITY` originally defaulted to
+     `EntityCommonStockSharesOutstanding` (a dei cover-page tag), on the
+     assumption a required cover-page element would have near-universal
+     coverage. First real run: 0 usable rows. A real-data diagnostic
+     showed that tag has only 3 total rows in a full quarter's bulk file
+     (SEC's Financial Statement Data Sets are built from the financial
+     statements, not the cover page). Fixed: `CommonStockSharesOutstanding`
+     (a real us-gaap balance-sheet tag, 27,424 rows same quarter) is now
+     primary; the original tag is a documented low-priority fallback.
+  2. After that fix, a real run against the 3 target CIKs produced 114
+     candidate rows where ~29 real firm-quarters were expected -- the same
+     true balance was being echoed once per later filing that reported it
+     as a prior-year comparative (e.g. POWL's 2019-12-31 value appeared
+     6 times). Fixed via the collapse-to-one-row-per-real-period logic
+     above. Separately, the same real run surfaced a genuine filer XBRL
+     scaling error: Lakeland Industries' 2020-01-31 and 2020-07-31 shares
+     outstanding were tagged 1000x too high in one comparative echo
+     (7,972,423,000 vs. the correct 7,972,423) -- caught incidentally by
+     the cap-band gate (`market_cap_above_max`) but not explained until
+     investigated; `flag_implausible_shares_jumps()` now flags this
+     deterministically for human review rather than relying on the cap
+     band to accidentally absorb it.
 
 ## Why it changed
 
 `H11_IMPLEMENTATION_SPEC.md` stage 2 needs `market_cap` and `adv_20d` per
 firm-quarter, and neither existed anywhere in this codebase before this
 milestone. This is the concrete implementation of the "real market data at
-scale" gap identified when scoping the full event-dataset build -- the
-biggest remaining bottleneck, per the corresponding scoping discussion, is
-not the CIK<->ticker mapping (already mitigated by design) but the
-market-cap data itself.
+scale" gap identified when scoping the full event-dataset build.
 
 ## New assumptions introduced
 
 - Market cap and ADV in this probe are computed as of `period_end` (the
-  quarter-end date), NOT the true `known_at` the spec requires (the 8-K/
-  10-Q event timestamp). Flagged explicitly in the script's own docstring
-  as a deliberate, temporary simplification -- must be corrected (joining
-  to the real `known_at` from `h11_data_probe.py`'s pipeline) before this
-  feeds any real universe build, not silently treated as equivalent.
-- `CommonStockSharesOutstanding` is now assumed to be the reliable primary
-  shares-outstanding source. This assumption is corrected-once already
-  (see above); it has NOT yet been validated against the real run for the
-  3 target CIKs specifically -- that's the next step, not yet complete as
-  of this REVIEW.md.
+  quarter-end date), NOT the true `known_at` the spec requires. Flagged
+  explicitly in the script's own docstring as a deliberate, temporary
+  simplification -- must be corrected before this feeds any real universe
+  build.
+- `CommonStockSharesOutstanding`, collapsed to one row per real period, is
+  now the shares-outstanding source of record. Validated against the 3
+  target CIKs specifically (see below), not just a same-quarter,
+  all-filers diagnostic.
+- `flag_implausible_shares_jumps()`'s >5x/<0.2x threshold is a first-pass,
+  documented-as-provisional choice, not independently tuned against a
+  larger sample yet.
 
 ## New invariants introduced
 
@@ -83,21 +88,27 @@ unchanged from existing, already-tested code.
 
 ## Validation performed
 
-- **247/247 tests pass** (`python -m pytest tests/`), up from 231 --
-  7 new tests for `extract_shares_outstanding()` (single-class, dual-class
-  summation, duration-fact exclusion, cross-filing non-summation, fallback
-  tag priority, missing columns, empty input) and 8 for the price connector's
-  pure functions (exact-date lookup, weekend/holiday rollback, pre-IPO
-  `None`, empty series, median-window correctness, median's outlier
-  robustness vs. a mean, insufficient-history `None`).
-- The tag-priority bug above was caught by a REAL run producing 0 rows,
-  not by a unit test (the unit tests were fixture-based and could not have
-  caught a wrong assumption about which real-world tag is populated) --
-  investigated via a throwaway diagnostic script against real live SEC
-  data rather than guessed at a second time.
-- **Not yet validated**: a real run against the 3 target CIKs with the
-  corrected tag has not been completed as of this REVIEW.md. That is the
-  explicit next step, not assumed to work from the fixture tests alone.
+- **253/253 tests pass** (`python -m pytest tests/`), up from 231 at the
+  start of this milestone -- covering single/dual-class summation,
+  duration-fact exclusion, cross-filing non-summation, the comparative-echo
+  collapse (including the fallback-to-earliest-filed edge case), the
+  fallback tag tier, the price connector's date/median-window logic
+  (including median's robustness to a single outlier day, matching the
+  real Lakeland case in kind), and the implausible-jump flag (including
+  its documented symmetric-flagging limitation).
+- **Real run completed** against the 3 verified CIKs, 11 quarters
+  (2020Q1-2022Q3): 173,191 shares-outstanding rows found across the full
+  bulk population; 114 candidate rows for the 3 target CIKs pre-fix
+  (duplicated by comparative echoes), 88 with a usable market cap, 86
+  qualifying H11's $50M-$2B cap band. Both real bugs above were caught by
+  this real run, not by the fixture-based unit tests, which by design
+  cannot catch a wrong assumption about which real-world tag or join
+  behavior actually holds.
+- **Not yet re-run**: the fixes in this REVIEW.md (collapse + implausible-
+  jump flag) have been committed but the probe has not yet been re-run
+  end-to-end against the 3 target CIKs with both fixes active together --
+  that is the explicit next step, not assumed to work from unit tests
+  alone.
 
 ## Remaining risks
 
@@ -105,17 +116,17 @@ Carried forward, plus this milestone's own:
 
 1. 8-K/A amendment fallback still not implemented.
 2. `market_cap`/`adv_20d` computed at `period_end`, not `known_at` -- must
-   be corrected before any real universe build (see above).
+   be corrected before any real universe build.
 3. Whether `EPS_TAG_PRIORITY` should be widened remains unresolved,
-   deferred pending real attrition evidence from a future full build --
-   no amendment drafted.
-4. `CommonStockSharesOutstanding` coverage for the 3 actual target CIKs is
-   still unconfirmed by a real run as of this REVIEW.md.
+   deferred pending real attrition evidence from a future full build.
+4. `flag_implausible_shares_jumps()`'s ratio threshold is provisional and
+   symmetric (flags both sides of a real jump, since 3 points alone can't
+   identify which side is wrong) -- a human still has to look, this does
+   not auto-correct anything.
 5. The BRKL-style low-trading-day-count flag (`< 100` trading days) is a
-   smell test, not a guarantee -- a recycled ticker with a long enough
-   fake history would not be caught by this check alone; the
-   `ticker_resolution_for_review.csv` manual review step is the real
-   safeguard.
+   smell test, not a guarantee; `ticker_resolution_for_review.csv`'s
+   manual review is the real safeguard, and is currently a process
+   convention, not a code-enforced gate.
 6. The `_STANDARD_TAXONOMY_PREFIXES` completeness is unverified against
    SEC's full taxonomy list.
 7. The duplicate-submissions-endpoint-per-CIK telemetry pattern is still
@@ -123,17 +134,16 @@ Carried forward, plus this milestone's own:
 
 ## Specific areas where external review should focus
 
-1. **Whether `CommonStockSharesOutstanding` is really the right primary
-   tag**, or whether it has its own gaps this quarter's diagnostic
-   (a single quarter, all filers, not the 3 target CIKs specifically)
-   didn't surface -- the pending real run against the actual target CIKs
-   is the next real test of this.
-2. **The `period_end`-vs-`known_at` simplification** -- confirm this
-   milestone's own docstring flag is loud enough that a future session
-   doesn't accidentally treat this probe's market_cap numbers as
-   spec-compliant before the correction is made.
-3. **The manual ticker-review step's actual rigor** -- `qualify_row()`
-   trusts `listing_exchange` and `market_cap` the moment they're computed;
-   confirm the review step happens BEFORE those numbers get used
-   downstream, not after, given the human-review gate is currently a
-   process convention, not a code-enforced gate.
+1. **Whether the comparative-echo collapse's tie-break (own-period filing,
+   else earliest-filed) is the right choice**, particularly for the rare
+   case where a company genuinely restates a prior figure (not just
+   echoes it) -- this logic currently cannot distinguish "echo" from
+   "genuine restatement," and always prefers the earlier value either way.
+2. **Whether the 1000x Lakeland error is really a filer mistake and not a
+   real corporate action** (e.g. a genuine share issuance) that happens to
+   look like a scaling error -- worth an independent eyeball at the actual
+   filing before fully dismissing it as a tagging bug.
+3. **The manual ticker-review step's actual rigor** -- confirm the review
+   happens BEFORE `market_cap`/`qualifies_cap_band` numbers get used
+   downstream, not after, given this gate is a process convention, not a
+   code-enforced one.

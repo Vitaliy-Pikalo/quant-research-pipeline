@@ -62,7 +62,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # allow running as
 
 from data_connectors.market_data_yfinance import fetch_daily_prices, price_as_of, trailing_median_dollar_adv
 from data_connectors.sec_company_tickers import fetch_company_tickers, fetch_submission
-from data_connectors.sec_financial_statement_datasets import extract_shares_outstanding, fetch_quarter
+from data_connectors.sec_financial_statement_datasets import (
+    extract_shares_outstanding,
+    fetch_quarter,
+    flag_implausible_shares_jumps,
+)
 from event_study.universe import UniverseConfig, qualify_row
 from hypotheses.h11_pead.config import H11Config
 
@@ -124,6 +128,12 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
         return
 
     shares_all = extract_shares_outstanding(sub_all, num_all)
+    # Deterministic sanity check, not a filter -- flags rows for human
+    # review rather than silently trusting or dropping them. Applied
+    # per-CIK across the FULL bulk population (not just the 3 target CIKs)
+    # since a real anomaly's neighbor might be outside the target set's
+    # own rows if quarters were requested non-contiguously.
+    shares_all = flag_implausible_shares_jumps(shares_all)
 
     # --- per-ticker price pull, once per CIK (not once per quarter) ---
     price_start = min(pd.Timestamp(q[:4] + "-01-01") for q in quarters) - pd.Timedelta(days=60)
@@ -179,6 +189,8 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
                 "period_end": period_end,
                 "shares_outstanding": row["shares_outstanding"],
                 "shares_outstanding_tag_used": row["tag_used"],
+                "shares_outstanding_is_own_reporting_period": row["is_own_reporting_period"],
+                "shares_outstanding_implausible_jump_flag": row["implausible_jump_flag"],
                 "ticker_used_for_price": cik_to_ticker.get(cik),
                 "price_as_of_period_end": price,  # HONESTY FLAG: period_end, not known_at -- see module docstring
                 "market_cap_as_of_period_end": market_cap,
@@ -201,6 +213,7 @@ def probe(ciks: list[str], quarters: list[str]) -> None:
         print(f"Rows with a usable market cap: {out_df['market_cap_as_of_period_end'].notna().sum()}")
         print(f"Rows flagged for low trading-day count (< {MIN_TRADING_DAYS_FOR_TRUSTED_SERIES}): {out_df['low_trading_day_count_flag'].sum()}")
         print(f"Rows qualifying H11's cap band (${config.min_market_cap:,.0f}-${config.max_market_cap:,.0f}): {(out_df['qualifies_cap_band'] == True).sum()}")
+        print(f"Rows flagged as an implausible shares-outstanding jump (needs human review, not auto-dropped): {out_df['shares_outstanding_implausible_jump_flag'].sum()}")
     print(f"\nFull output written under {OUT_DIR}")
     print(f"Review {OUT_DIR / 'ticker_resolution_for_review.csv'} manually before trusting any ticker join above.")
 

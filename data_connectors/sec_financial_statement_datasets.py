@@ -139,14 +139,27 @@ def extract_shares_outstanding(sub_df: pd.DataFrame, num_df: pd.DataFrame, tag_p
     (same concept, different tag names, pick the best one); share-class
     rows do not compete, they add up to total shares outstanding.
 
-    Only sums within a single (cik, ddate, adsh) -- if the same period_end
-    is reported across more than one filing (e.g. a 10-Q and a later
-    10-Q/A), those are kept as separate rows (most recently FILED one
-    should be preferred by the caller), never summed across filings, which
-    would double-count.
+Sums only within a single (cik, ddate, adsh) -- multiple filings that
+    happen to report the SAME historical ddate (extremely common: every
+    10-Q/10-K also reports the prior-year comparative balance, so one real
+    quarter-end value shows up again and again in every later filing that
+    references it) are never summed across filings, which would
+    double-count. Instead they are collapsed to exactly one row per
+    (cik, ddate) -- preferring the filing for which this ddate IS that
+    filing's own reporting period (`sub_df.period == ddate`, i.e. the
+    as-first-reported figure, not a later comparative echo of it); if no
+    filing's own period matches (shouldn't normally happen but not
+    assumed impossible), the earliest-FILED row is kept, on the same
+    as-first-filed-not-restated principle used elsewhere in this project.
+    A real run surfaced exactly why this matters: without this collapse,
+    the same true value appeared 5-6 times per firm-quarter in probe
+    output, once per later filing that echoed it as a comparative figure.
 
     Returns columns: cik, period_end, shares_outstanding, tag_used, form,
-    filed, adsh.
+    filed, adsh, is_own_reporting_period (bool -- False means this row's
+    value came from a comparative echo in a later filing because no
+    filing's own period matched this ddate; worth a second look if True
+    is rare in real output).
     """
     tag_priority = tag_priority or SHARES_OUTSTANDING_TAG_PRIORITY
 
@@ -157,7 +170,9 @@ def extract_shares_outstanding(sub_df: pd.DataFrame, num_df: pd.DataFrame, tag_p
 
     candidates = num_df[num_df["tag"].isin(tag_priority) & (num_df["qtrs"] == 0)]
     if candidates.empty:
-        return pd.DataFrame(columns=["cik", "period_end", "shares_outstanding", "tag_used", "form", "filed", "adsh"])
+        return pd.DataFrame(
+            columns=["cik", "period_end", "shares_outstanding", "tag_used", "form", "filed", "adsh", "is_own_reporting_period"]
+        )
 
     # Defensive dedup on the full fact identity (including coreg, if
     # present) before summing -- protects against the same exact row
@@ -182,14 +197,72 @@ def extract_shares_outstanding(sub_df: pd.DataFrame, num_df: pd.DataFrame, tag_p
     merged = merged.merge(best_tag_per_group, on=["cik", "ddate", "adsh"])
     merged = merged[merged["tag"] == merged["_chosen_tag"]]
 
-    summed = merged.groupby(["cik", "ddate", "adsh", "form", "filed"], as_index=False).agg(
+    summed = merged.groupby(["cik", "ddate", "adsh", "form", "filed", "period"], as_index=False).agg(
         shares_outstanding=("value", "sum"), tag_used=("tag", "first")
     )
 
-    summed["cik"] = summed["cik"].astype(str).str.zfill(10)
-    summed["period_end"] = pd.to_datetime(summed["ddate"], format="%Y%m%d", errors="coerce")
-    summed["filed"] = pd.to_datetime(summed["filed"], format="%Y%m%d", errors="coerce")
-    return summed[["cik", "period_end", "shares_outstanding", "tag_used", "form", "filed", "adsh"]].reset_index(drop=True)
+    # Collapse multiple filings' echoes of the same real (cik, ddate) down
+    # to one row: prefer the filing whose OWN period equals this ddate
+    # (the as-first-reported figure) over a later filing merely restating
+    # it as a comparative balance; break remaining ties by earliest filed.
+    summed["_is_own_period"] = summed["ddate"] == summed["period"]
+    summed = summed.sort_values(["cik", "ddate", "_is_own_period", "filed"], ascending=[True, True, False, True])
+    collapsed = summed.drop_duplicates(subset=["cik", "ddate"], keep="first").copy()
+
+    collapsed["cik"] = collapsed["cik"].astype(str).str.zfill(10)
+    collapsed["period_end"] = pd.to_datetime(collapsed["ddate"], format="%Y%m%d", errors="coerce")
+    collapsed["filed"] = pd.to_datetime(collapsed["filed"], format="%Y%m%d", errors="coerce")
+    collapsed = collapsed.rename(columns={"_is_own_period": "is_own_reporting_period"})
+    return collapsed[
+        ["cik", "period_end", "shares_outstanding", "tag_used", "form", "filed", "adsh", "is_own_reporting_period"]
+    ].reset_index(drop=True)
+
+
+def flag_implausible_shares_jumps(shares_df: pd.DataFrame, max_ratio: float = 5.0) -> pd.DataFrame:
+    """
+    Deterministic, code-enforced sanity check -- NOT a judgment call --
+    for the kind of real filer XBRL scaling error a live run surfaced:
+    Lakeland Industries' 2020-01-31 shares outstanding reported as
+    7,972,423,000 in one filing's comparative echo vs. the correct
+    7,972,423 in every other filing referencing the same date (and
+    2020-07-31 similarly, 8,481,665,000 vs. 8,481,665) -- a 1000x tagging
+    mistake, not a real 1000x share issuance.
+
+    Flags any (cik, period_end) row whose shares_outstanding is more than
+    `max_ratio`x larger or smaller than that same cik's chronologically
+    adjacent (immediately preceding and following) value in `shares_df`.
+    This never drops or corrects a value -- it only adds a boolean column
+    for a human (or a later, more targeted fix) to act on, matching this
+    project's standing rule against silently filtering surprising data.
+
+    HONEST LIMITATION: this is symmetric -- given only 3 data points and no
+    other ground truth, there is no way to know which SIDE of a sharp
+    jump is the error, so both the true anomaly and its immediate
+    neighbor(s) get flagged. This deliberately errs toward over-flagging
+    (a human reviews a few extra rows) rather than under-flagging (a real
+    error like the Lakeland case silently reaches a backtest).
+
+    shares_df : output of extract_shares_outstanding(), one row per
+        (cik, period_end) already (post-collapse).
+
+    Returns shares_df with one added column: implausible_jump_flag (bool).
+    """
+    out = shares_df.sort_values(["cik", "period_end"]).copy()
+    out["_prev"] = out.groupby("cik")["shares_outstanding"].shift(1)
+    out["_next"] = out.groupby("cik")["shares_outstanding"].shift(-1)
+
+    def _is_implausible(row) -> bool:
+        value = row["shares_outstanding"]
+        for neighbor in (row["_prev"], row["_next"]):
+            if neighbor is None or pd.isna(neighbor) or neighbor == 0:
+                continue
+            ratio = value / neighbor
+            if ratio >= max_ratio or ratio <= (1.0 / max_ratio):
+                return True
+        return False
+
+    out["implausible_jump_flag"] = out.apply(_is_implausible, axis=1)
+    return out.drop(columns=["_prev", "_next"]).reset_index(drop=True)
 
 
 def custom_tag_fallback_rate(num_df: pd.DataFrame, standard_tags: list[str] | None = None) -> dict:
