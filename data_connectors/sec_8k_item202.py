@@ -102,6 +102,90 @@ def parse_submission_filings_for_item_202(raw_submission: dict) -> pd.DataFrame:
     )
 
 
+PERIODIC_FORMS_DEFAULT = ("10-K", "10-Q", "10-KT", "10-QT")
+
+
+def parse_submission_filings_for_periodic(
+    raw_submission: dict, forms: tuple[str, ...] = PERIODIC_FORMS_DEFAULT
+) -> pd.DataFrame:
+    """
+    Same parallel-array pivot as parse_submission_filings_for_item_202, but
+    filtered to PERIODIC reports (10-K/10-Q and their transition variants)
+    rather than 8-K Item 2.02.
+
+    WHY: the SEC Financial Statement Data Sets' sub.txt gives a periodic
+    filing's `filed` as a DATE ONLY (YYYYMMDD), with no time. Reading a
+    date-only field as an instant requires a convention, and the convention
+    previously in use (parse as UTC midnight, convert to Eastern) placed the
+    filing at ~20:00 ET on the PREVIOUS calendar day -- see the defect list
+    in hypotheses/h11_pead/known_at_resolver.py. The submissions API carries
+    the real `acceptanceDateTime` for periodic filings exactly as it does
+    for 8-Ks, so where a filing appears here the ambiguity disappears
+    entirely rather than being resolved by picking a convention. That makes
+    preferring this source a plain engineering improvement, not a
+    research-definition change.
+
+    LIMITATION, stated rather than worked around: `filings.recent` holds
+    only the most recent block of filings (documented as roughly the last
+    1000, or one year, whichever is larger); older filings live in the
+    separate `filings.files` archives, which this function does NOT fetch.
+    For a 2015-2025 build, most older periodic filings will therefore NOT be
+    found here and the caller falls back to sub.txt's date-only value. The
+    caller records which path each row took so the real prevalence of the
+    fallback is measured, not assumed.
+
+    Returns columns: cik, accession_number, form, report_date, filing_date,
+    acceptance_datetime (tz-aware US/Eastern, same conversion and same
+    reasoning as the Item 2.02 path -- both known_at sources must be
+    expressed in the same timezone or the section 6 4pm-ET rule is applied
+    to inconsistent inputs).
+    """
+    cik = str(raw_submission["cik"]).zfill(10)
+    recent = raw_submission["filings"]["recent"]
+
+    n = len(recent["form"])
+    df = pd.DataFrame(
+        {
+            "form": recent["form"],
+            "accession_number": recent["accessionNumber"],
+            "filing_date": recent["filingDate"],
+            "report_date": recent.get("reportDate", [None] * n),
+            "acceptance_datetime": recent.get("acceptanceDateTime", [None] * n),
+        }
+    )
+    df["cik"] = cik
+
+    result = df[df["form"].isin(list(forms))].copy()
+    result["filing_date"] = pd.to_datetime(result["filing_date"], errors="coerce")
+    result["report_date"] = pd.to_datetime(result["report_date"], errors="coerce")
+    result["acceptance_datetime"] = pd.to_datetime(result["acceptance_datetime"], utc=True, errors="coerce").dt.tz_convert(
+        "US/Eastern"
+    )
+    return result[["cik", "accession_number", "form", "report_date", "filing_date", "acceptance_datetime"]].reset_index(
+        drop=True
+    )
+
+
+def fetch_raw_submission(
+    cik: str, session: requests.Session | None = None, telemetry: RequestTelemetryCollector | None = None
+) -> dict:  # pragma: no cover -- network
+    """
+    One request, raw JSON, so a caller needing more than one view of the
+    same submissions payload (identifiers, Item 2.02 8-Ks, periodic
+    acceptance timestamps) can parse it three ways off a single fetch
+    instead of hitting the identical URL three times. Directly addresses the
+    duplication fetch_item_202_filings' own docstring flagged from telemetry.
+    Endpoint label stays "sec_submissions" so the saving is visible in the
+    telemetry summary as a drop in request count against the same endpoint.
+    """
+    session = session or requests.Session()
+    url = SUBMISSIONS_URL_TMPL.format(cik=int(cik))
+    resp = instrumented_get(
+        session, url, headers={"User-Agent": SEC_USER_AGENT}, timeout=30, endpoint_label="sec_submissions", telemetry=telemetry
+    )
+    return resp.json()
+
+
 def fetch_item_202_filings(
     cik: str, session: requests.Session | None = None, telemetry: RequestTelemetryCollector | None = None
 ) -> pd.DataFrame:  # pragma: no cover -- network
